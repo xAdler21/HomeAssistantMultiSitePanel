@@ -1,0 +1,292 @@
+# Konfiguration des Multi-Site Panels
+# Wird in configuration.yaml per  config: !include multisite-panel.yaml  eingebunden.
+# Nach Änderungen Home Assistant neu starten.
+#
+# Platzhalter in GROSSBUCHSTABEN durch echte Entitäten ersetzen und die Zeile einkommentieren.
+# In der App unter Orte → Einrichtung prüfen (nur für Admins) steht, was noch fehlt.
+
+wetter: weather.forecast_home
+aussentemperatur: sensor.1a_ems_esp_boiler_outside_temperature
+
+# Geräte mit diesem Label erscheinen auf der Startseite unter „Favoriten“
+favoriten_label: favorit
+
+# ---------------------------------------------------------------------------
+# Standorte
+# etagen: Etagen aus Home Assistant (ID oder Name). Alle Räume dieser Etagen gehören zum Standort.
+# bereiche: zusätzliche Räume ohne Etage (z. B. Hof, Garten).
+# Ein Gebäude ohne Stockwerke bekommt einfach eine Etage mit seinem Namen.
+# ---------------------------------------------------------------------------
+standorte:
+  - id: m1
+    name: Mangoldinger Straße 1
+    kurz: Mangoldinger 1
+    kuerzel: Firma
+    rolle: Firma
+    icon: mdi:office-building
+    etagen:
+      - Werkstatt
+      - Büro          # Räume z. B. „Büro links“, „Büro rechts“, „Büro Anbau“
+      - Neue Halle
+      - Stadel
+    bereiche:
+      - Hof
+    bereiche_titel: Außen
+
+  - id: m1a
+    name: Mangoldinger Straße 1a
+    kurz: Mangoldinger 1a
+    kuerzel: 1a
+    rolle: Wohnhaus
+    icon: mdi:home
+    etagen:              # die Etagen gibt es in deinem HA schon
+      - 1. Stock
+      - Erdgeschoss
+      - Keller
+    bereiche:
+      - Aussen
+    bereiche_titel: Außen
+
+  - id: a2
+    name: Ammerhofweg 2
+    kurz: Ammerhofweg 2
+    kuerzel: Ammerhof
+    rolle: Haus Onkel
+    icon: mdi:home-variant
+    etagen:
+      - Ammerhofweg
+
+  - id: w1
+    name: Waidl 1
+    kurz: Waidl 1
+    kuerzel: Waidl
+    rolle: Wohnhaus & Halle
+    icon: mdi:warehouse
+    etagen:
+      - id: Waidl Wohnhaus
+        name: Wohnhaus
+      - id: Waidl Halle
+        name: Halle
+
+  - id: gae
+    name: Alte Gärtnerei
+    kurz: Alte Gärtnerei
+    kuerzel: Gärtnerei
+    rolle: Gärtnerei
+    icon: mdi:flower
+    etagen:
+      - Alte Gärtnerei
+
+# ---------------------------------------------------------------------------
+# Heizbetrieb Winter/Sommer (Holz im Winter, Öl im Sommer)
+# Ohne entity gilt automatisch: Oktober bis April = Winter.
+# Mit einem input_select (Optionen „Winter“ und „Sommer“) kann man in der App umschalten.
+# ---------------------------------------------------------------------------
+heizsaison:
+  # entity: input_select.heizsaison
+  titel: Heizbetrieb
+  text: Holz im Winter, Öl im Sommer
+
+# ---------------------------------------------------------------------------
+# Versorgung: ein Eintrag pro Anschluss
+# art: strom | gas | holz | oel | waerme | waermepumpe | wasser | brunnen | internet | sonstiges
+# messung: voll | teilweise | therme | keine | geplant | offen
+# leistung/solar/netz: aktuelle Leistung in W oder kW (netz: + Bezug, − Einspeisung; sonst netz_umkehren: true)
+# *_heute: Tageswerte in kWh (z. B. per Zähler-Helfer „Utility Meter“, täglicher Zyklus)
+# ---------------------------------------------------------------------------
+versorgung:
+  - id: strom1
+    art: strom
+    name: "Strom · Zähler 1"
+    ort: Mangoldinger Straße 1
+    standorte: [m1]
+    messung: voll
+    # leistung: sensor.ZAEHLER1_LEISTUNG
+    # solar: sensor.PV_LEISTUNG
+    # netz: sensor.ZAEHLER1_NETZLEISTUNG
+    # verbrauch_heute: sensor.ZAEHLER1_VERBRAUCH_HEUTE
+    # solar_heute: sensor.PV_ERTRAG_HEUTE
+    # einspeisung_heute: sensor.ZAEHLER1_EINSPEISUNG_HEUTE
+    versorgt:
+      - name: Werkstatt
+        standort: m1
+        # leistung: sensor.SHELLY_WERKSTATT_LEISTUNG
+      - name: Büro links
+        standort: m1
+        # leistung: sensor.SHELLY_BUERO_LINKS_LEISTUNG
+      - name: Büro Anbau
+        standort: m1
+      - name: Stadel
+        standort: m1
+      - name: Neue Halle
+        standort: m1
+      - name: Wallbox
+        standort: m1
+        # leistung: sensor.WALLBOX_LEISTUNG
+    geplant:
+      - Zweite PV-Anlage
+      - Stromspeicher
+
+  - id: strom2
+    art: strom
+    name: "Strom · Zähler 2"
+    ort: Ammerhofweg 2
+    standorte: [a2, m1a, w1, gae, m1]
+    messung: teilweise
+    hinweis: Der Gesamtverbrauch an diesem Zähler wird noch nicht gemessen. Werte gibt es bisher nur für das Wohnhaus 1a.
+    versorgt:
+      - name: Haus Onkel
+        standort: a2
+      - name: Wohnhaus 1a
+        standort: m1a
+        # leistung: sensor.WOHNHAUS_1A_LEISTUNG
+      - name: Waidl 1 · Halle
+        standort: w1
+      - name: Waidl 1 · Wohnhaus
+        standort: w1
+      - name: Alte Gärtnerei
+        standort: gae
+      - name: Büro rechte Hälfte
+        standort: m1
+
+  - id: gas1
+    art: gas
+    name: Gas 1
+    ort: Mangoldinger Straße 1a
+    standorte: [m1a]
+    messung: therme
+    hinweis: Die Werte kommen direkt aus der Therme (EMS-Bus). Der Gasverbrauch ist die Schätzung der Therme, nicht der Gaszähler.
+    # verbrauch_heute: sensor.1a_ems_esp_boiler_GASVERBRAUCH_HEUTE
+    werte_titel: Therme
+    werte:
+      - name: Außentemperatur
+        entity: sensor.1a_ems_esp_boiler_outside_temperature
+        icon: mdi:thermometer
+      # Namen in HA prüfen (Entwicklerwerkzeuge → Zustände, Filter „1a_ems_esp“):
+      # - name: Vorlauf
+      #   entity: sensor.1a_ems_esp_boiler_current_flow_temperature
+      #   icon: mdi:thermometer
+      # - name: Rücklauf
+      #   entity: sensor.1a_ems_esp_boiler_return_temperature
+      #   icon: mdi:thermometer
+      # - name: Warmwasser
+      #   entity: sensor.1a_ems_esp_boiler_dhw_current_intern_temperature
+      #   icon: mdi:water-thermometer
+      # - name: Brennerleistung
+      #   entity: sensor.1a_ems_esp_boiler_actual_burner_power
+      #   icon: mdi:fire
+
+  - id: gas2
+    art: gas
+    name: Gas 2
+    ort: Waidl 1
+    standorte: [w1]
+    messung: keine
+    beschreibung: Waidl 1 komplett
+
+  - id: holz
+    art: holz
+    name: Holzheizung
+    standorte: [m1, a2]
+    saison: winter
+    messung: offen
+    beschreibung: Büro, Wohnung · im Winter auch Ammerhofweg 2
+    versorgt:
+      - name: Büro
+        standort: m1
+        hinweis: Winter
+      - name: Wohnung
+        hinweis: Winter
+      - name: Haus Onkel
+        standort: a2
+        hinweis: Winter
+
+  - id: oel
+    art: oel
+    name: Ölheizung
+    ort: Ammerhofweg 2
+    standorte: [a2]
+    saison: sommer
+    messung: offen
+    versorgt:
+      - name: Haus Onkel
+        standort: a2
+        hinweis: Sommer
+
+  - id: wasser
+    art: wasser
+    name: Stadtwasser
+    ort: Ammerhofweg 2
+    standorte: [a2]
+    messung: keine
+    beschreibung: nur Ammerhofweg 2
+
+  - id: brunnen
+    art: brunnen
+    name: Brunnen
+    standorte: [m1, m1a, w1, gae]
+    messung: geplant
+    beschreibung: alle Gebäude außer Ammerhofweg 2
+    hinweis: Die Steuerung kommt über eine Siemens LOGO!. Sobald sie angebunden ist, erscheinen hier Pumpe, Laufzeit und Druck.
+
+  - id: internet
+    art: internet
+    name: Internet
+    ort: Mangoldinger Straße 1
+    standorte: [m1, m1a, a2, w1, gae]
+    beschreibung: kommt in Mangoldinger 1 an · versorgt alles
+    # status: binary_sensor.UNIFI_INTERNET        # device_class connectivity → „Online“/„Offline“
+    # werte:
+    #   - name: Download
+    #     entity: sensor.UNIFI_WAN_DOWNLOAD
+    #     icon: mdi:download
+    #   - name: Upload
+    #     entity: sensor.UNIFI_WAN_UPLOAD
+    #     icon: mdi:upload
+
+# ---------------------------------------------------------------------------
+# Haushaltsgeräte (Status-Entität und/oder Leistungsmessung per Zwischenstecker)
+# art: waschmaschine | trockner | spuelmaschine | backofen | kaffeemaschine
+# ---------------------------------------------------------------------------
+# geraete:
+#   - name: Waschmaschine
+#     art: waschmaschine
+#     bereich: Waschküche                 # Raum in HA (ID oder Name)
+#     leistung: sensor.SHELLY_WASCHMASCHINE_LEISTUNG
+#     schwelle: 5                         # läuft, solange mehr als 5 W
+#     # status: sensor.WASCHMASCHINE_STATUS
+#     # restzeit: sensor.WASCHMASCHINE_RESTZEIT     # Minuten oder Zeitpunkt
+#     # mitteilung: input_boolean.waschmaschine_mitteilung
+
+# ---------------------------------------------------------------------------
+# Türen, Tore, Kameras (UniFi). Tore (cover) und Schlösser (lock), die einem Raum
+# zugeordnet sind, erscheinen automatisch. Hier nur Zusätzliches eintragen.
+# ---------------------------------------------------------------------------
+# zugang:
+#   - entity: lock.BUERO_EINGANG
+#     standort: m1
+#   - entity: cover.WERKSTATT_TOR
+#     standort: m1
+# kameras:
+#   - entity: camera.EINFAHRT
+#     standort: m1
+# ereignisse:                              # erscheinen unter Sicherheit → Heute
+#   - binary_sensor.EINFAHRT_PERSON_ERKANNT
+
+# ---------------------------------------------------------------------------
+# Szenen auf der Startseite (scene.*, script.* oder button.*)
+# ---------------------------------------------------------------------------
+# szenen:
+#   - name: Feierabend
+#     beschreibung: "Firma: Licht aus, Tore zu"
+#     entity: script.feierabend_firma
+#     standort: m1
+#     icon: mdi:lock
+
+# ---------------------------------------------------------------------------
+# Wer sieht welche Standorte (Name wie in HA unter Einstellungen → Personen → Benutzer).
+# Nur ein Sichtfilter, keine echte Berechtigung.
+# ---------------------------------------------------------------------------
+# benutzer:
+#   - name: Max Mustermann
+#     standorte: [m1]

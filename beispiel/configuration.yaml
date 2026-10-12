@@ -1,0 +1,45 @@
+# Diese Blöcke in die configuration.yaml von Home Assistant übernehmen.
+# Die Datei multisite-panel.yaml liegt daneben im selben Ordner (/config).
+
+panel_custom:
+  - name: multisite-panel
+    url_path: zuhause
+    sidebar_title: Zuhause
+    sidebar_icon: mdi:home
+    # ?v= bei jedem Update erhöhen, sonst zeigt die iOS-App noch die alte Version
+    module_url: /local/multisite-panel/multisite-panel.js?v=0.1.0
+    config: !include multisite-panel.yaml
+
+# Optional: Umschalter für den Heizbetrieb (in multisite-panel.yaml bei heizsaison → entity eintragen)
+input_select:
+  heizsaison:
+    name: Heizsaison
+    options:
+      - Winter
+      - Sommer
+    icon: mdi:sun-snowflake-variant
+
+# Optional: Schalter „Mitteilung, wenn fertig“ für die Waschmaschine
+input_boolean:
+  waschmaschine_mitteilung:
+    name: Mitteilung Waschmaschine
+    icon: mdi:bell
+
+# Beispiel-Automation: Push aufs iPhone, wenn die Waschmaschine fertig ist.
+# Besser über Einstellungen → Automationen anlegen; hier nur zum Abschreiben.
+# automation:
+#   - alias: Waschmaschine fertig
+#     triggers:
+#       - trigger: numeric_state
+#         entity_id: sensor.SHELLY_WASCHMASCHINE_LEISTUNG
+#         below: 5
+#         for: "00:03:00"
+#     conditions:
+#       - condition: state
+#         entity_id: input_boolean.waschmaschine_mitteilung
+#         state: "on"
+#     actions:
+#       - action: notify.mobile_app_DEIN_IPHONE
+#         data:
+#           title: Waschmaschine
+#           message: Die Wäsche ist fertig.
