@@ -1133,7 +1133,7 @@ class MultisitePanel extends HTMLElement {
       alerts.length ? this._sec('Hinweise', `<div class="alerts">${alerts.join('')}</div>`) : '',
       this._sec('Szenen', `<div class="scenes">${sceneHtml}</div>`),
       favs.length ? this._sec('Favoriten', this._grid(favs, e => this._tile(e, {ctx: true})) + '<p class="hint">Tippen schaltet. Gedrückt halten öffnet die Einstellungen.</p>')
-        : (this._hass.user && this._hass.user.is_admin ? this._sec('Favoriten', `<div class="card empty">Noch keine Favoriten. Gib Geräten in Home Assistant das Label <code>${esc(this._cfg.favLabel)}</code>, dann erscheinen sie hier.</div>`) : ''),
+        : (this._hass.user && this._hass.user.is_admin && !this._index.favs.length ? this._sec('Favoriten', `<div class="card empty">Noch keine Favoriten. Gib Geräten in Home Assistant das Label <code>${esc(this._cfg.favLabel)}</code>, dann erscheinen sie hier.</div>`) : ''),
       runs.length ? this._sec('Läuft gerade', `<div class="runs">${runs.join('')}</div>`) : '',
       energy ? this._sec('Energie', energy) : '',
     ].join('')};
