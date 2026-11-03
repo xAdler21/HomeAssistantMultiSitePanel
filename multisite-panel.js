@@ -616,7 +616,7 @@ class MultisitePanel extends HTMLElement {
     else if (st.site !== 'alle' && !this._sites.some(s => s.id === st.site)) st.site = 'alle';
     if (!this._cfg.sites.length){
       this.$tabbar.hidden = true;
-      this.$screen.innerHTML = `<div class="view">${this._rootHeader('Noch nicht eingerichtet', 'Multi-Site Panel', {noSite: true})}<div class="card empty">In der Konfiguration ist noch kein Standort angelegt. Trage unter <code>panel_custom → config</code> mindestens einen Eintrag bei <code>standorte</code> ein und starte Home Assistant neu. Ein Beispiel liegt im Repository unter <code>beispiel/multisite-panel.yaml</code>.</div></div>`;
+      this.$screen.innerHTML = `<div class="view">${this._rootHeader('Noch nicht eingerichtet', 'Multi-Site Panel', {noSite: true})}<div class="card empty">In der Konfiguration ist noch kein Standort angelegt. Trage unter <code>panel_custom → config</code> mindestens einen Eintrag bei <code>standorte</code> ein und starte Home Assistant neu. Ein Beispiel liegt im Repository unter <code>beispiel/art_custom/multisite-panel.yaml</code>.</div></div>`;
       return;
     }
     this.$tabbar.hidden = false;

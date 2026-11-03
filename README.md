@@ -12,22 +12,37 @@ Die Struktur kommt aus Home Assistant selbst (Etagen und Räume). Neue Geräte e
 
 ## Installation
 
-1. **Datei kopieren:** `multisite-panel.js` nach `/config/www/multisite-panel/` auf dem HA-Server.
-   Mit dem Samba-Add-on geht das per Skript:
+Die YAML-Konfiguration liegt in `/homeassistant/art_configs/` und wird als Pakete geladen (Pfade wie im File-Editor- oder VS-Code-Add-on, entspricht `/config/`):
+
+```yaml
+# configuration.yaml
+homeassistant:
+  packages: !include_dir_named art_configs
+```
+
+`beispiel/` bildet diese Ordner nach. Die Dateien kommen so auf den HA-Server:
+
+| aus dem Repository | nach | wofür |
+|---|---|---|
+| `multisite-panel.js` | `/homeassistant/www/art_custom/` | das Panel, im Browser unter `/local/art_custom/multisite-panel.js` |
+| `beispiel/art_custom/multisite-panel.yaml` | `/homeassistant/art_custom/` | Standorte, Anschlüsse usw. (außerhalb von `www`, also nicht öffentlich abrufbar) |
+| `beispiel/art_configs/multisite_panel.yaml` | `/homeassistant/art_configs/` | Paket mit `panel_custom` und den optionalen Helfern |
+
+1. **Ordner anlegen** und die drei Dateien im Add-on hochladen (File Editor: Ordnersymbol → Hochladen; VS Code: Datei in den Explorer ziehen).
+   Ist der Konfigurationsordner per Samba erreichbar, kopiert `werkzeuge/deploy.ps1` die JS-Datei:
    ```
    powershell -ExecutionPolicy Bypass -File .\werkzeuge\deploy.ps1 -Ziel "\\homeassistant.local\config"
    ```
-2. **Konfiguration anlegen:** `beispiel/multisite-panel.yaml` nach `/config/multisite-panel.yaml` kopieren und anpassen.
-3. **Panel eintragen:** den `panel_custom`-Block aus `beispiel/configuration.yaml` in die `configuration.yaml` übernehmen.
-4. **Home Assistant neu starten.** In der Seitenleiste erscheint „Zuhause“ (Adresse `/zuhause`).
-5. Als Admin **Orte → Einrichtung prüfen** öffnen. Dort steht, welche Etagen, Räume und Entitäten aus der Konfiguration fehlen, und welche Etagen-IDs es in HA gibt.
+2. **`multisite-panel.yaml` anpassen.** Sie darf nicht in `art_configs` liegen, sonst lädt HA sie als eigenes Paket und meldet einen Fehler.
+3. **Entwicklerwerkzeuge → YAML → Konfiguration prüfen**, dann **Home Assistant neu starten.** In der Seitenleiste erscheint „Zuhause“ (Adresse `/zuhause`).
+4. Als Admin **Orte → Einrichtung prüfen** öffnen. Dort steht, welche Etagen, Räume und Entitäten aus der Konfiguration fehlen, und welche Etagen-IDs es in HA gibt.
 
 ## Als Startseite der iPhone-App
 
 Home Assistant bietet eigene Panels nicht als Startseite an, nur Dashboards. Deshalb gibt es die kleine Karte `multisite-start`, die beim Öffnen der App einmal ins Panel weiterleitet:
 
 1. **Einstellungen → Dashboards → ⋮ → Ressourcen → Ressource hinzufügen**
-   URL genau wie bei `module_url`, also `/local/multisite-panel/multisite-panel.js?v=0.1.0`, Typ „JavaScript-Modul“.
+   URL genau wie bei `module_url`, also `/local/art_custom/multisite-panel.js?v=0.1.0`, Typ „JavaScript-Modul“.
 2. Neues Dashboard „Start“ anlegen, im Rohkonfigurationseditor:
    ```yaml
    views:
@@ -50,7 +65,7 @@ Für Familienmitglieder lässt sich die HA-Seitenleiste im Profil aufräumen. Ob
 
 ## Konfiguration
 
-Alles steht in `multisite-panel.yaml`. Ein vollständiges Beispiel mit Kommentaren liegt in `beispiel/`.
+Alles steht in `multisite-panel.yaml`. Ein vollständiges Beispiel mit Kommentaren liegt in `beispiel/art_custom/`.
 
 | Schlüssel | Bedeutung |
 |---|---|
@@ -69,8 +84,8 @@ Leistungen dürfen in W oder kW kommen, Energie in Wh oder kWh, das Panel rechne
 
 ## Update
 
-1. Neue `multisite-panel.js` kopieren.
-2. In `configuration.yaml` und in der Dashboard-Ressource `?v=` auf die neue Version setzen.
+1. Neue `multisite-panel.js` nach `/homeassistant/www/art_custom/` hochladen.
+2. In `art_configs/multisite_panel.yaml` und in der Dashboard-Ressource `?v=` auf die neue Version setzen.
 3. Home Assistant neu starten.
 
 Ohne neue `?v=`-Nummer zeigt die iOS-App oft noch die alte Version aus dem Zwischenspeicher. Änderungen an `multisite-panel.yaml` brauchen ebenfalls einen Neustart.
@@ -88,12 +103,12 @@ Dann `http://localhost:8765/dev/vorschau.html` öffnen (mit `?hell` oder `?dunke
 - **Der Filter `benutzer` ist nur ein Sichtfilter.** Home Assistant kennt (Stand 2026.9) keine Rechte pro Gerät; wer angemeldet ist, kann technisch alles schalten und in Verlauf und Logbuch alles sehen.
 - **Kameras:** Die Kacheln zeigen Standbilder, das Live-Bild öffnet sich im Kamera-Dialog von Home Assistant.
 - **Verlauf:** Das Diagramm zeigt nur den heutigen Tag.
-- **Mitteilungen:** Push-Mitteilungen (z. B. „Waschmaschine fertig“) laufen über HA-Automationen; ein Beispiel steht in `beispiel/configuration.yaml`.
+- **Mitteilungen:** Push-Mitteilungen (z. B. „Waschmaschine fertig“) laufen über HA-Automationen; ein Beispiel steht in `beispiel/art_configs/multisite_panel.yaml`.
 
 ## Aufbau
 
 - `multisite-panel.js`: das Panel und die Startseiten-Karte (eine Datei, kein Build-Schritt)
-- `beispiel/`: Konfiguration und `configuration.yaml`-Ausschnitt
+- `beispiel/`: Paket (`art_configs/`) und Panel-Konfiguration (`art_custom/`), Ordner wie auf dem HA-Server
 - `dev/`: lokale Vorschau mit Beispieldaten
 - `werkzeuge/`: Kopier-Skript und Vorschau-Server
 - `prototyp/`: der ursprüngliche klickbare Entwurf

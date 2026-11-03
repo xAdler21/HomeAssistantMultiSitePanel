@@ -1,5 +1,12 @@
-# Diese Blöcke in die configuration.yaml von Home Assistant übernehmen.
-# Die Datei multisite-panel.yaml liegt daneben im selben Ordner (/config).
+# Paket für das Multi-Site Panel. Liegt in /homeassistant/art_configs/ und wird über
+#   homeassistant:
+#     packages: !include_dir_named art_configs
+# automatisch geladen. Der Dateiname ist der Paketname, deshalb Unterstrich statt Bindestrich.
+#
+# Dazu gehören:
+#   /homeassistant/www/art_custom/multisite-panel.js   das Panel (im Browser unter /local/art_custom/…)
+#   /homeassistant/art_custom/multisite-panel.yaml     Standorte, Anschlüsse usw. (nicht öffentlich abrufbar)
+# Nach Änderungen Home Assistant neu starten.
 
 panel_custom:
   - name: multisite-panel
@@ -7,8 +14,8 @@ panel_custom:
     sidebar_title: Zuhause
     sidebar_icon: mdi:home
     # ?v= bei jedem Update erhöhen, sonst zeigt die iOS-App noch die alte Version
-    module_url: /local/multisite-panel/multisite-panel.js?v=0.1.0
-    config: !include multisite-panel.yaml
+    module_url: /local/art_custom/multisite-panel.js?v=0.1.0
+    config: !include ../art_custom/multisite-panel.yaml
 
 # Optional: Umschalter für den Heizbetrieb (in multisite-panel.yaml bei heizsaison → entity eintragen)
 input_select:
