@@ -149,6 +149,20 @@ export const mockConfig = {
   ],
 };
 
+/* Nachgebauter Speicher der Integration, gemeinsam für alle Vorschau-Tabs (localStorage + BroadcastChannel) */
+const STORE_KEY = 'msp-mock-store';
+if (new URLSearchParams(location.search).has('zuruecksetzen')) localStorage.removeItem(STORE_KEY);
+const storeGet = () => { try { const s = localStorage.getItem(STORE_KEY); if (s) return JSON.parse(s); } catch (e) { /* egal */ } return JSON.parse(JSON.stringify(mockConfig)); };
+const subs = new Set();
+const notify = cfg => subs.forEach(cb => cb({config: cfg}));
+const channel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('msp-mock') : null;
+if (channel) channel.onmessage = ev => notify(ev.data);
+const USERS = [
+  {id: 'mock-admin', name: 'Admin', group_ids: ['system-admin'], is_active: true, system_generated: false},
+  {id: 'mock-max', name: 'Max Mustermann', group_ids: ['system-users'], is_active: true, system_generated: false},
+  {id: 'mock-supervisor', name: 'Supervisor', group_ids: ['system-admin'], is_active: true, system_generated: true},
+];
+
 /* Tageskurven für den Verlauf */
 const pvAt = t => { const x = (t - 7.4) / 11.2; if (x <= 0 || x >= 1) return 0; let v = 6.5 * Math.pow(Math.sin(Math.PI * x), 1.6); if (t > 10.5 && t < 11.25) v *= 0.55; return v; };
 const loadAt = t => { let v = 0.55 + 0.08 * Math.sin(t * 1.7); if (t >= 6.5 && t < 17) v += 2.1 + 0.6 * Math.sin(t * 2.3); if (t >= 9 && t < 9.5) v += 1.8; if (t >= 14 && t < 14.5) v += 1.2; if (t >= 12 && t < 12.75) v -= 1.2; return Math.max(0.3, v); };
@@ -203,6 +217,22 @@ export function createMockHass(onChange){
 
   const callWS = async msg => {
     if (msg.type === 'config/floor_registry/list') return Object.values(floors);
+    if (msg.type === 'config/auth/list') return USERS;
+    if (msg.type === 'multisite_panel/config/get') return {config: storeGet()};
+    if (msg.type === 'multisite_panel/config/save'){
+      await new Promise(r => setTimeout(r, 200));
+      localStorage.setItem(STORE_KEY, JSON.stringify(msg.config));
+      notify(msg.config);
+      if (channel) channel.postMessage(msg.config);
+      console.info('[mock] Konfiguration gespeichert');
+      return null;
+    }
+    // Der Mock kann kein YAML; JSON ist gültiges YAML und reicht zum Testen
+    if (msg.type === 'multisite_panel/yaml/dump') return {yaml: JSON.stringify(msg.config, null, 2)};
+    if (msg.type === 'multisite_panel/yaml/parse'){
+      try { return {config: JSON.parse(msg.yaml)}; }
+      catch (e){ throw {code: 'invalid_yaml', message: `Der Mock versteht nur JSON: ${e.message}`}; }
+    }
     const t0 = Date.parse(msg.start_time), t1 = Date.parse(msg.end_time);
     if (msg.type === 'history/history_during_period'){
       const out = {};
@@ -236,6 +266,14 @@ export function createMockHass(onChange){
     hassUrl: p => p,
     formatEntityState: st => `${st.state}${st.attributes.unit_of_measurement ? ' ' + st.attributes.unit_of_measurement : ''}`,
     callService, callWS,
+    connection: {
+      subscribeMessage: (cb, msg) => {
+        if (msg.type !== 'multisite_panel/subscribe') return Promise.reject(new Error(`Mock kennt ${msg.type} nicht`));
+        subs.add(cb);
+        setTimeout(() => cb({config: storeGet()}), 50);
+        return Promise.resolve(() => subs.delete(cb));
+      },
+    },
   };
   return hass;
 }

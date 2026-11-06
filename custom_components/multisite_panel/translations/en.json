@@ -1,0 +1,13 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Multi-Site Panel",
+        "description": "Adds “Zuhause” (the app) and “Zuhause bearbeiten” (the editor, admins only) to the sidebar. An existing art_custom/multisite-panel.yaml is imported on first start."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Multi-Site Panel is already set up."
+    }
+  }
+}

@@ -1,9 +1,10 @@
 /*
  * Multi-Site Panel für Home Assistant
- * Eigene, app-artige Oberfläche für mehrere Standorte. Wird über panel_custom geladen.
+ * Eigene, app-artige Oberfläche für mehrere Standorte. Wird von der Integration multisite_panel angemeldet
+ * (Konfiguration kommt dann live über den Websocket) oder per panel_custom mit config aus YAML.
  * Keine Build-Schritte und keine externen Abhängigkeiten: Icons kommen von <ha-icon> aus Home Assistant.
  */
-const VERSION = '0.1.0';
+const VERSION = '0.2.0';
 
 /* ---------- Hilfsfunktionen ---------- */
 const nf1 = new Intl.NumberFormat('de-DE', {minimumFractionDigits: 1, maximumFractionDigits: 1});
@@ -556,8 +557,14 @@ class MultisitePanel extends HTMLElement {
     this._bind();
   }
 
-  /* Von Home Assistant gesetzt */
-  set panel(p){ this._panel = p; this._cfg = normConfig(p && p.config); this._index = null; this._queue(); }
+  /* Von Home Assistant gesetzt (im Editor: Entwurf mit vorschau: true) */
+  set panel(p){
+    this._panel = p;
+    this._store = !!(p && p.config && p.config.speicher);
+    if (this._store) this._subscribe();
+    else { this._cfg = normConfig(p && p.config); this._index = null; }
+    this._queue();
+  }
   get panel(){ return this._panel; }
   set narrow(n){ if (this._narrow !== n){ this._narrow = n; this._queue(); } }
   get narrow(){ return this._narrow; }
@@ -566,7 +573,8 @@ class MultisitePanel extends HTMLElement {
   set hass(h){
     const first = !this._hass;
     this._hass = h;
-    if (!this._cfg) this._cfg = normConfig(this._panel && this._panel.config);
+    if (this._store) this._subscribe();
+    else if (!this._cfg) this._cfg = normConfig(this._panel && this._panel.config);
     if (first){ const saved = lsGet(this._lsKey('site')); if (saved) this._st.site = saved; }
     if (!h.floors && !this._floorsReq && h.callWS){
       // Ältere Frontends liefern die Etagen nicht im hass-Objekt mit
@@ -586,8 +594,35 @@ class MultisitePanel extends HTMLElement {
     this._tick = setInterval(() => this._queue(), 30000);
     this._camTick = setInterval(() => this._refreshCams(), 2500);
     this._camN = 0;
+    if (this._store) this._subscribe();
   }
-  disconnectedCallback(){ clearInterval(this._tick); clearInterval(this._camTick); }
+  disconnectedCallback(){ clearInterval(this._tick); clearInterval(this._camTick); this._unsubscribe(); }
+
+  /* Konfiguration aus der Integration: kommt sofort und nach jedem Speichern im Editor erneut */
+  _subscribe(){
+    if (this._sub || !this.isConnected || !this._hass || !this._hass.connection) return;
+    const sub = this._sub = this._hass.connection.subscribeMessage(msg => {
+      this._cfg = normConfig(msg.config); this._cfgErr = null; this._index = null; this._queue();
+    }, {type: 'multisite_panel/subscribe'});
+    sub.catch(e => { if (this._sub === sub) this._sub = null; this._cfgErr = (e && e.message) || String(e); this._queue(); });
+  }
+  _unsubscribe(){
+    if (!this._sub) return;
+    this._sub.then(unsub => unsub()).catch(() => {});
+    this._sub = null;
+  }
+  _editorUrl(){ const c = this._panel && this._panel.config; return c && c.speicher && !c.vorschau ? c.editor || null : null; }
+
+  /* Für die Vorschau im Editor: zeigt einen Bereich und optional eine Unterseite */
+  zeige(tab, page = null, id = null){
+    if (!TABS.some(t => t.id === tab)) return;
+    this._closeSheet();
+    this._st.tab = tab;
+    this._st.stacks[tab] = page ? [{page, id, scroll: 0}] : [];
+    this._render();
+    this.$screen.scrollTop = 0;
+  }
+  get hinweise(){ return this._index ? this._index.issues : []; }
 
   /* ---------- Rendern ---------- */
   /* Gebündeltes Neuzeichnen: höchstens alle 500 ms, nicht während Scrollen oder Antippen.
@@ -606,7 +641,15 @@ class MultisitePanel extends HTMLElement {
   _lsKey(k){ const u = this._hass && this._hass.user; return `msp-${k}-${u ? u.id : 'x'}`; }
   _render(){
     const h = this._hass;
-    if (!h || !this._cfg) return;
+    if (!h) return;
+    if (!this._cfg){
+      if (this._cfgErr){
+        this.toggleAttribute('dark', !!(h.themes && h.themes.darkMode));
+        this.$tabbar.hidden = true;
+        this.$screen.innerHTML = `<div class="view"><header class="lt"><span class="eyebrow">Multi-Site Panel</span><h1>Zuhause</h1></header><div class="card empty">Die Konfiguration konnte nicht geladen werden: ${esc(this._cfgErr)}</div></div>`;
+      }
+      return;
+    }
     this._lastRender = Date.now();
     this.toggleAttribute('dark', !!(h.themes && h.themes.darkMode));
     if (!this._index) this._index = this._buildIndex();
@@ -616,7 +659,13 @@ class MultisitePanel extends HTMLElement {
     else if (st.site !== 'alle' && !this._sites.some(s => s.id === st.site)) st.site = 'alle';
     if (!this._cfg.sites.length){
       this.$tabbar.hidden = true;
-      this.$screen.innerHTML = `<div class="view">${this._rootHeader('Noch nicht eingerichtet', 'Multi-Site Panel', {noSite: true})}<div class="card empty">In der Konfiguration ist noch kein Standort angelegt. Trage unter <code>panel_custom → config</code> mindestens einen Eintrag bei <code>standorte</code> ein und starte Home Assistant neu. Ein Beispiel liegt im Repository unter <code>beispiel/art_custom/multisite-panel.yaml</code>.</div></div>`;
+      const ed = this._store && this._editorUrl() && h.user && h.user.is_admin;
+      const text = !this._store
+        ? 'In der Konfiguration ist noch kein Standort angelegt. Trage unter <code>panel_custom → config</code> mindestens einen Eintrag bei <code>standorte</code> ein und starte Home Assistant neu. Ein Beispiel liegt im Repository unter <code>beispiel/art_custom/multisite-panel.yaml</code>.'
+        : ed ? 'Es ist noch kein Standort angelegt. Lege im Editor mindestens einen Standort an, die App zeigt ihn sofort.'
+        : 'Es ist noch kein Standort angelegt. Ein Admin kann das unter „Zuhause bearbeiten“ nachholen.';
+      const btn = ed ? `<button class="btn wide" data-act="editor">${ic('mdi:pencil-ruler')}Editor öffnen</button>` : '';
+      this.$screen.innerHTML = `<div class="view">${this._rootHeader('Noch nicht eingerichtet', 'Multi-Site Panel', {noSite: true})}<div class="card empty">${text}</div>${btn}</div>`;
       return;
     }
     this.$tabbar.hidden = false;
@@ -633,6 +682,7 @@ class MultisitePanel extends HTMLElement {
     for (const eid of this._index.relevant) this._prev[eid] = h.states[eid];
     this._onScroll();
     if (out.after) out.after();
+    this.dispatchEvent(new CustomEvent('msp-gerendert'));   // für den Editor (Hinweise neben der Vorschau)
   }
   _renderTabbar(){
     this.$tabbar.innerHTML = `<div class="tabbar-in">${TABS.map(t => { const a = this._st.tab === t.id; return `<button class="tab ${a ? 'active' : ''}" data-act="tab" data-tab="${t.id}" aria-current="${a ? 'page' : 'false'}">${ic(a ? t.iconOn : t.icon)}<span>${t.label}</span></button>`; }).join('')}</div>`;
@@ -1160,7 +1210,9 @@ class MultisitePanel extends HTMLElement {
     if (admin){
       const ix = this._index;
       const warn = ix.issues.filter(i => i.level !== 'info').length;
+      const ed = this._editorUrl();
       extra = this._sec('Einrichtung', `<div class="list">
+        ${ed ? `<button class="row" data-act="editor"><span class="row-ic soft">${ic('mdi:pencil-ruler')}</span><span class="row-main"><span class="row-title">Bearbeiten</span><span class="row-sub">Standorte, Anschlüsse, Geräte und Szenen ändern</span></span>${ic('mdi:chevron-right', 'chev')}</button>` : ''}
         <button class="row" data-act="push" data-page="unassigned"><span class="row-ic soft">${ic('mdi:map-marker-question-outline')}</span><span class="row-main"><span class="row-title">Nicht zugeordnet</span><span class="row-sub">Geräte ohne Raum oder ohne Standort</span></span><span class="row-end"><span class="row-val">${ix.unassigned.length}</span></span>${ic('mdi:chevron-right', 'chev')}</button>
         <button class="row" data-act="push" data-page="check"><span class="row-ic soft">${ic('mdi:clipboard-check-outline')}</span><span class="row-main"><span class="row-title">Einrichtung prüfen</span><span class="row-sub">Etagen, Räume und Entitäten aus der Konfiguration</span></span><span class="row-end">${warn ? `<span class="pill warn">${ic('mdi:alert')}${warn}</span>` : `<span class="pill ok">${ic('mdi:check')}OK</span>`}</span>${ic('mdi:chevron-right', 'chev')}</button>
       </div><p class="hint">Nur für Admins sichtbar.</p>`);
@@ -1713,6 +1765,7 @@ class MultisitePanel extends HTMLElement {
         case 'push': this._closeSheet(); this._push(el.dataset.page, id); break;
         case 'back': this._back(); break;
         case 'menu': this.dispatchEvent(new CustomEvent('hass-toggle-menu', {bubbles: true, composed: true})); break;
+        case 'editor': { const url = this._editorUrl(); if (url){ history.pushState(null, '', url); window.dispatchEvent(new CustomEvent('location-changed')); } break; }
         case 'site-sheet': this._openSheet('site'); break;
         case 'lights-sheet': this._openSheet('lights'); break;
         case 'set-site': this._st.site = id; lsSet(this._lsKey('site'), id); this._closeSheet(); this._render(); this.$screen.scrollTop = 0; break;
@@ -1774,29 +1827,5 @@ class MultisitePanel extends HTMLElement {
 }
 const CSS_ESC = s => (window.CSS && window.CSS.escape ? window.CSS.escape(s) : String(s).replace(/"/g, '\\"'));
 
-/* ---------- Startseiten-Karte: leitet beim App-Start einmal ins Panel weiter ---------- */
-class MultisiteStart extends HTMLElement {
-  setConfig(c){ this._ziel = (c && c.ziel) || '/zuhause'; this._render(); }
-  set hass(h){ this._hass = h; if (!this._tried){ this._tried = true; setTimeout(() => this._go(), 0); } }
-  connectedCallback(){ this._render(); }
-  getCardSize(){ return 1; }
-  _go(){
-    const params = new URLSearchParams(location.search);
-    if (window.__multisiteRedirected || params.has('bleiben') || params.has('edit') || this.editMode || this.preview || this.closest && this.closest('hui-card-preview')) return;
-    window.__multisiteRedirected = true;
-    history.replaceState(null, '', this._ziel || '/zuhause');
-    window.dispatchEvent(new CustomEvent('location-changed', {detail: {replace: true}}));
-  }
-  _render(){
-    const ziel = esc(this._ziel || '/zuhause');
-    this.innerHTML = `<ha-card style="padding:16px;line-height:1.5">Beim Öffnen der App geht es automatisch weiter zu <a href="${ziel}">${ziel}</a>. Um dieses Dashboard zu bearbeiten, hänge <code>?bleiben</code> an die Adresse.</ha-card>`;
-  }
-}
-
 if (!customElements.get('multisite-panel')) customElements.define('multisite-panel', MultisitePanel);
-if (!customElements.get('multisite-start')){
-  customElements.define('multisite-start', MultisiteStart);
-  window.customCards = window.customCards || [];
-  window.customCards.push({type: 'multisite-start', name: 'Multi-Site Start', description: 'Leitet beim Öffnen der App einmal ins Multi-Site Panel weiter.'});
-}
 console.info(`%c MULTISITE-PANEL %c ${VERSION} `, 'background:#1C6A54;color:#fff;font-weight:700;border-radius:3px 0 0 3px', 'background:#DAECE4;color:#1C6A54;font-weight:700;border-radius:0 3px 3px 0');

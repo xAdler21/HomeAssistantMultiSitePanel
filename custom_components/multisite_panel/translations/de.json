@@ -1,0 +1,13 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Multi-Site Panel",
+        "description": "Legt in der Seitenleiste „Zuhause“ (die App) und „Zuhause bearbeiten“ (der Editor, nur für Admins) an. Eine vorhandene Datei art_custom/multisite-panel.yaml wird beim ersten Start übernommen."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Das Multi-Site Panel ist schon eingerichtet."
+    }
+  }
+}

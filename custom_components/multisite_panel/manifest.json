@@ -1,0 +1,14 @@
+{
+  "domain": "multisite_panel",
+  "name": "Multi-Site Panel",
+  "codeowners": ["@xAdler21"],
+  "config_flow": true,
+  "dependencies": ["frontend", "http", "panel_custom", "websocket_api"],
+  "documentation": "https://github.com/xAdler21/HomeAssistantMultiSitePanel",
+  "integration_type": "service",
+  "iot_class": "calculated",
+  "issue_tracker": "https://github.com/xAdler21/HomeAssistantMultiSitePanel/issues",
+  "requirements": [],
+  "single_config_entry": true,
+  "version": "0.2.0"
+}

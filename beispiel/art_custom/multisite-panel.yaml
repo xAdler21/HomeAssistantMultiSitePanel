@@ -1,8 +1,8 @@
-# Konfiguration des Multi-Site Panels
-# Liegt in /homeassistant/art_custom/ und wird im Paket art_configs/multisite_panel.yaml per
-#   config: !include ../art_custom/multisite-panel.yaml
-# eingebunden. Nicht nach art_configs legen, sonst lädt HA sie als eigenes Paket.
-# Nach Änderungen Home Assistant neu starten.
+# Beispielkonfiguration des Multi-Site Panels
+# Seit Version 0.2 wird alles im Editor („Zuhause bearbeiten“) gepflegt. Diese Datei dient als Vorlage:
+# Liegt sie beim ersten Einrichten der Integration unter /homeassistant/art_custom/multisite-panel.yaml,
+# wird sie übernommen. Später lässt sie sich im Editor unter YAML einfügen.
+# Nicht nach art_configs legen, sonst lädt HA sie als eigenes Paket.
 #
 # Platzhalter in GROSSBUCHSTABEN durch echte Entitäten ersetzen und die Zeile einkommentieren.
 # In der App unter Orte → Einrichtung prüfen (nur für Admins) steht, was noch fehlt.
