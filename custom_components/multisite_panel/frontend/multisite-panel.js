@@ -4,7 +4,7 @@
  * (Konfiguration kommt dann live über den Websocket) oder per panel_custom mit config aus YAML.
  * Keine Build-Schritte und keine externen Abhängigkeiten: Icons kommen von <ha-icon> aus Home Assistant.
  */
-const VERSION = '0.2.0';
+const VERSION = '0.3.0';
 
 /* ---------- Hilfsfunktionen ---------- */
 const nf1 = new Intl.NumberFormat('de-DE', {minimumFractionDigits: 1, maximumFractionDigits: 1});
@@ -25,6 +25,14 @@ const powerFactor = u => u === 'W' ? 0.001 : u === 'MW' ? 1000 : 1;
 const energyFactor = u => u === 'Wh' ? 0.001 : u === 'MWh' ? 1000 : 1;
 function powerKW(st){ if (!st) return null; const v = num(st.state); return v == null ? null : v * powerFactor(st.attributes.unit_of_measurement); }
 function energyKWh(st){ if (!st) return null; const v = num(st.state); return v == null ? null : v * energyFactor(st.attributes.unit_of_measurement); }
+/* Anzeigename wie in HA: ab 2026.4 über formatEntityName (Gerät + Entität), friendly_name ist zur Abkündigung vorgesehen */
+function entName(h, st){
+  if (!st) return '';
+  if (h && typeof h.formatEntityName === 'function'){
+    try { const n = h.formatEntityName(st, [{type: 'device'}, {type: 'entity'}], {separator: ' '}); if (n) return String(n); } catch (e) { /* ältere Frontends */ }
+  }
+  return st.attributes.friendly_name || st.entity_id;
+}
 function duration(iso){
   const m = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000));
   if (!Number.isFinite(m) || m < 1) return null;
@@ -170,8 +178,14 @@ function normConfig(raw){
     season: c.heizsaison ? asObj(c.heizsaison, 'entity') : null,
     users: arr(c.benutzer).map(u => ({name: u.name ?? null, id: u.id ?? null, sites: arr(u.standorte).map(String)})),
     menuButton: c.menue_knopf !== false,
+    plans: arr(c.plaene).filter(p => p && p.bild).map((p, i) => ({
+      id: String(p.id ?? `plan_${i + 1}`), name: p.name || 'Lageplan', site: p.standort ? String(p.standort) : null,
+      file: String(p.bild), w: num(p.breite), h: num(p.hoehe),
+      points: arr(p.punkte).filter(x => x && x.entity && num(x.x) != null && num(x.y) != null).map(x => ({entity: x.entity, x: num(x.x), y: num(x.y), name: x.name || null, icon: x.icon || null})),
+    })),
   };
 }
+const BILD_URL = '/api/multisite_panel/bild';
 
 /* ---------- Gestaltung ---------- */
 const CSS = `
@@ -540,8 +554,125 @@ h2{font-size:20px;font-weight:700;letter-spacing:-.01em}
 .issue+.issue::before{content:"";position:absolute;top:0;left:44px;right:0;border-top:.5px solid var(--sep)}
 .issue .i{--mdc-icon-size:20px;margin-top:-1px}
 .issue.error .i{color:var(--crit)} .issue.warn .i{color:var(--warn)} .issue.info .i{color:var(--fg-3)}
+.plans{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px}
+.plan-card{display:flex;flex-direction:column;border-radius:var(--r-card);background:var(--card);box-shadow:var(--shadow);overflow:hidden;width:100%;transition:transform .12s}
+.plan-card:active{transform:scale(.98)}
+.plan-thumb{display:block;aspect-ratio:16/9;background:var(--cam-bg);position:relative;overflow:hidden}
+.plan-thumb img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
+.plan-thumb img.fehlt,.planv-img.fehlt{visibility:hidden}
+.plan-meta{display:flex;align-items:center;gap:12px;padding:12px 14px}
+.planv{position:relative;overflow:hidden;border-radius:var(--r-card);background:var(--cam-bg);touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab;height:280px}
+.planv-stage{position:absolute;left:0;top:0;will-change:transform}
+.planv-img{display:block;width:100%;height:100%;pointer-events:none;-webkit-user-drag:none}
+.planv-pts{position:absolute;inset:0}
+.pm{position:absolute;width:38px;height:38px;transform:translate(-50%,-50%);display:grid;place-items:center;text-align:center}
+.pm-ic{width:36px;height:36px;border-radius:50%;display:grid;place-items:center;background:rgba(20,23,21,.74);color:#fff;border:2px solid rgba(255,255,255,.85);box-shadow:0 2px 8px rgba(0,0,0,.4);transition:background .2s,box-shadow .2s,transform .12s}
+.pm:active .pm-ic{transform:scale(.9)}
+.pm-ic .i{--mdc-icon-size:20px}
+.pm.on .pm-ic{background:var(--c,var(--c-light));color:#fff;box-shadow:0 0 0 6px rgba(255,190,40,.35),0 0 22px rgba(255,190,40,.75)}
+.pm.unav{opacity:.45}
+.pm-l{display:none;position:absolute;top:100%;left:50%;transform:translateX(-50%);margin-top:2px;font-size:11px;font-weight:600;color:#fff;background:rgba(0,0,0,.62);padding:2px 6px;border-radius:6px;white-space:nowrap;pointer-events:none}
+.planv.labels .pm-l{display:block}
+.planv-msg{position:absolute;inset:0;display:grid;place-items:center;color:var(--cam-ink);opacity:.75;font-size:14px;text-align:center;padding:20px;pointer-events:none}
+.planv-msg[hidden]{display:none}
+.planv-ctrl{position:absolute;right:8px;top:8px;display:flex;gap:2px;padding:2px;border-radius:12px;background:rgba(20,23,21,.6);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);z-index:2}
+.planv-ctrl button{width:34px;height:34px;border-radius:10px;color:#fff;display:grid;place-items:center}
+.planv-ctrl button:active{background:rgba(255,255,255,.18)}
+.planv-ctrl .i{--mdc-icon-size:20px}
 @media (prefers-reduced-motion: reduce){ *,*::before,*::after{animation:none!important;transition:none!important} }
 `;
+
+/* ---------- Lageplan: zoom- und verschiebbar, mit Knöpfen für Lichter ----------
+   Das Element überlebt das Neuzeichnen des Panels, damit das große Bild nicht jedes Mal neu geladen wird.
+   Die Knöpfe sind data-tile-Elemente: Tippen schaltet, langes Drücken öffnet die Einstellungen (wie bei Kacheln). */
+class PlanView {
+  constructor(panel){
+    this.panel = panel;
+    this.el = document.createElement('div');
+    this.el.className = 'planv';
+    this.el.innerHTML = `<div class="planv-stage"><img class="planv-img" alt="" draggable="false"><div class="planv-pts"></div></div><div class="planv-msg">Bild wird geladen …</div><div class="planv-ctrl"><button data-z="in" aria-label="Vergrößern">${ic('mdi:plus')}</button><button data-z="out" aria-label="Verkleinern">${ic('mdi:minus')}</button><button data-z="fit" aria-label="Ganzes Bild zeigen">${ic('mdi:fit-to-screen-outline')}</button></div>`;
+    this.stage = this.el.querySelector('.planv-stage');
+    this.img = this.el.querySelector('.planv-img');
+    this.pts = this.el.querySelector('.planv-pts');
+    this.msg = this.el.querySelector('.planv-msg');
+    this.s = 1; this.tx = 0; this.ty = 0; this.fitted = false; this.nw = 4; this.nh = 3;
+    this._gestures();
+  }
+  update(p, markers){
+    this.nw = p.w || this.img.naturalWidth || 4; this.nh = p.h || this.img.naturalHeight || 3;
+    this.pts.innerHTML = markers;
+  }
+  loaded(){
+    const ok = this.img.complete && this.img.naturalWidth > 0 && !this.img.classList.contains('fehlt');
+    this.msg.textContent = ok ? '' : 'Das Bild konnte nicht geladen werden.';
+    this.msg.hidden = ok;
+  }
+  layout(){
+    const W = this.el.clientWidth; if (!W) return;
+    const maxH = (this.panel.$screen.clientHeight || window.innerHeight) * 0.66;
+    this.el.style.height = `${Math.round(Math.min(maxH, Math.max(240, W * this.nh / this.nw)))}px`;
+    if (!this.fitted){ this.fitted = true; this.fit(); } else this.apply();
+    if (this.img.complete && this.img.getAttribute('src')) this.loaded();
+  }
+  fit(){ this.s = 1; this.tx = 0; this.ty = 0; this.apply(); }
+  apply(){
+    const W = this.el.clientWidth, H = this.el.clientHeight; if (!W || !H) return;
+    const base = Math.min(W / this.nw, H / this.nh), w = this.nw * base * this.s, h = this.nh * base * this.s;
+    this.tx = w <= W ? (W - w) / 2 : Math.min(0, Math.max(W - w, this.tx));
+    this.ty = h <= H ? (H - h) / 2 : Math.min(0, Math.max(H - h, this.ty));
+    this.stage.style.width = `${w}px`; this.stage.style.height = `${h}px`;
+    this.stage.style.transform = `translate3d(${this.tx}px,${this.ty}px,0)`;
+    this.el.classList.toggle('labels', this.s >= 2);
+  }
+  zoomAt(x, y, f){
+    const s = Math.min(8, Math.max(1, this.s * f)), k = s / this.s;
+    this.tx = x - (x - this.tx) * k; this.ty = y - (y - this.ty) * k; this.s = s;
+    this.apply();
+  }
+  _gestures(){
+    const el = this.el, pts = new Map();
+    let last = null, start = null, pinch = null, moved = false;
+    const pos = e => { const r = el.getBoundingClientRect(); return {x: e.clientX - r.left, y: e.clientY - r.top}; };
+    const move = e => {
+      if (!pts.has(e.pointerId)) return;
+      const p = pos(e); pts.set(e.pointerId, p);
+      if (pts.size === 1){
+        if (!moved && Math.hypot(p.x - start.x, p.y - start.y) > 6) moved = true;
+        if (moved){ this.tx += p.x - last.x; this.ty += p.y - last.y; this.apply(); }
+        last = p;
+      } else {
+        const [a, b] = [...pts.values()], d = Math.hypot(a.x - b.x, a.y - b.y) || 1, m = {x: (a.x + b.x) / 2, y: (a.y + b.y) / 2};
+        if (pinch){ this.tx += m.x - pinch.m.x; this.ty += m.y - pinch.m.y; this.zoomAt(m.x, m.y, d / pinch.d); }
+        pinch = {d, m}; moved = true;
+      }
+      if (moved && e.cancelable) e.preventDefault();
+    };
+    const up = e => {
+      pts.delete(e.pointerId); pinch = null;
+      if (pts.size) { last = [...pts.values()][0]; return; }
+      window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up);
+      this.panel._planGesture = false;
+      setTimeout(() => { moved = false; }, 0);
+    };
+    el.addEventListener('pointerdown', e => {
+      if (e.target.closest('.planv-ctrl')) return;
+      const p = pos(e);
+      if (!pts.size){ start = p; moved = false; window.addEventListener('pointermove', move, {passive: false}); window.addEventListener('pointerup', up); window.addEventListener('pointercancel', up); }
+      pts.set(e.pointerId, p); last = p; pinch = null;
+      this.panel._planGesture = true;
+    });
+    // Nach dem Verschieben kein Schalten auslösen
+    el.addEventListener('click', e => { if (moved){ e.stopPropagation(); e.preventDefault(); moved = false; } }, true);
+    el.addEventListener('wheel', e => { e.preventDefault(); const p = pos(e); this.zoomAt(p.x, p.y, Math.exp(-e.deltaY * 0.0015)); }, {passive: false});
+    el.addEventListener('dblclick', e => { if (e.target.closest('.pm,.planv-ctrl')) return; const p = pos(e); if (this.s > 1.5) this.fit(); else this.zoomAt(p.x, p.y, 2.5); });
+    el.querySelector('.planv-ctrl').addEventListener('click', e => {
+      const b = e.target.closest('[data-z]'); if (!b) return;
+      e.stopPropagation();
+      if (b.dataset.z === 'fit') this.fit(); else this.zoomAt(el.clientWidth / 2, el.clientHeight / 2, b.dataset.z === 'in' ? 1.6 : 1 / 1.6);
+    });
+    window.addEventListener('resize', () => { if (el.isConnected) this.layout(); });
+  }
+}
 
 /* ---------- Panel ---------- */
 class MultisitePanel extends HTMLElement {
@@ -553,6 +684,7 @@ class MultisitePanel extends HTMLElement {
     this.$app = $('app'); this.$screen = $('screen'); this.$tabbar = $('tabbar'); this.$toast = $('toast'); this.$layer = $('layer'); this.$sheet = $('sheet');
     this._st = {tab: 'start', site: 'alle', stacks: {start: [], orte: [], heizung: [], versorgung: [], sicherheit: []}, rootScroll: {}, anim: null, sheet: null};
     this._opt = new Map(); this._prev = {}; this._hist = {}; this._log = null; this._camUrl = {};
+    this._planViews = {}; this._signed = {};
     this._lastRender = 0; this._lastScroll = 0;
     this._bind();
   }
@@ -630,11 +762,11 @@ class MultisitePanel extends HTMLElement {
   _queue(){
     if (this._wait) return;
     const now = Date.now();
-    const delay = this._busy ? 300 : Math.max(16, 300 - (now - this._lastScroll), 500 - (now - this._lastRender));
+    const delay = this._busy || this._planGesture ? 300 : Math.max(16, 300 - (now - this._lastScroll), 500 - (now - this._lastRender));
     this._wait = setTimeout(() => {
       this._wait = null;
       const t = Date.now();
-      if (this._busy || t - this._lastScroll < 300){ this._queue(); return; }
+      if (this._busy || this._planGesture || t - this._lastScroll < 300){ this._queue(); return; }
       this._render();
     }, delay);
   }
@@ -674,6 +806,7 @@ class MultisitePanel extends HTMLElement {
     try { out = top ? this._page(top) : this._rootPage(st.tab); }
     catch (e){ console.error('[multisite-panel]', e); out = {nav: top ? this._navBar('Fehler') : '', body: `<div class="card empty">Diese Seite konnte nicht angezeigt werden: ${esc(e.message)}</div>`}; }
     this.$screen.innerHTML = (out.nav || '') + `<div class="view ${st.anim ? 'anim-' + st.anim : ''}">${out.body}</div>`;
+    this._mountPlans();
     this.$app.classList.toggle('root', !top);
     st.anim = null;
     this._renderTabbar();
@@ -695,6 +828,7 @@ class MultisitePanel extends HTMLElement {
       case 'supply': return this._pSupply(e.id);
       case 'unassigned': return this._pUnassigned();
       case 'check': return this._pCheck();
+      case 'plan': return this._pPlan(e.id);
       default: return this._rootPage(this._st.tab);
     }
   }
@@ -748,8 +882,9 @@ class MultisitePanel extends HTMLElement {
     cfg.cameras.forEach(c => add(c.entity, 'kameras'));
     cfg.events.forEach(e => add(e, 'ereignisse'));
     cfg.favs.forEach(e => add(e, 'favoriten'));
+    cfg.plans.forEach(p => p.points.forEach(pt => add(pt.entity, `Lageplan ${p.name}`)));
     for (const [eid, where] of refs) if (!h.states[eid]) issues.push({level: 'warn', text: `Die Entität ${eid} gibt es nicht (${where}).`});
-    for (const s of [...cfg.scenes, ...cfg.access, ...cfg.cameras, ...cfg.appliances]){
+    for (const s of [...cfg.scenes, ...cfg.access, ...cfg.cameras, ...cfg.appliances, ...cfg.plans]){
       const site = s.site;
       if (site && !cfg.sites.some(x => x.id === site)) issues.push({level: 'warn', text: `Standort „${site}“ ist nicht angelegt (bei ${s.name || s.entity}).`});
     }
@@ -777,7 +912,7 @@ class MultisitePanel extends HTMLElement {
     }
     // Areas der Konfig-Entitäten (Geräte, Zugang, Kameras) für die Standortzuordnung
     for (const [eid] of refs){ const a = areaOf(eid); if (a){ entArea[eid] = a; if (areaSite[a]) entSite[eid] = areaSite[a]; } }
-    const nameOf = eid => (h.states[eid] && h.states[eid].attributes.friendly_name) || eid;
+    const nameOf = eid => entName(h, h.states[eid]) || eid;
     const sortN = (a, b) => nameOf(a).localeCompare(nameOf(b), 'de');
     Object.values(byArea).forEach(b => Object.values(b).forEach(l => l.sort(sortN)));
     unassigned.sort(sortN);
@@ -819,7 +954,7 @@ class MultisitePanel extends HTMLElement {
   _groupOf(aid){ const s = this._index.areaSite[aid]; const g = (this._index.groups[s] || []).find(x => x.areas.includes(aid)); return g ? g.name : ''; }
   _name(eid, ctxName){
     const st = this._hass.states[eid];
-    let n = (st && st.attributes.friendly_name) || eid;
+    let n = entName(this._hass, st) || eid;
     if (ctxName && lc(n).startsWith(lc(ctxName) + ' ')) n = n.slice(ctxName.length + 1);
     return n.charAt(0).toUpperCase() + n.slice(1);
   }
@@ -936,7 +1071,7 @@ class MultisitePanel extends HTMLElement {
   }
   _accessModel(eid, conf, site){
     const h = this._hass, st = h.states[eid], dom = domainOf(eid);
-    const name = conf.name || st.attributes.friendly_name || eid;
+    const name = conf.name || entName(h, st);
     let open = false, label = st.state, action = null;
     const kind = conf.art || (dom === 'cover' ? 'tor' : 'tuer');
     if (dom === 'cover'){
@@ -967,7 +1102,7 @@ class MultisitePanel extends HTMLElement {
       if (!h.states[c.entity]) continue;
       const site = c.site || this._index.entSite[c.entity] || null;
       if (!match(site)) continue;
-      out.push({eid: c.entity, name: c.name || h.states[c.entity].attributes.friendly_name || c.entity, site}); seen.add(c.entity);
+      out.push({eid: c.entity, name: c.name || entName(h, h.states[c.entity]), site}); seen.add(c.entity);
     }
     for (const s of this._sites){ if (!match(s.id)) continue; this._ents('camera', s.id).forEach(e => { if (!seen.has(e)){ seen.add(e); out.push({eid: e, name: this._name(e), site: s.id}); } }); }
     return out;
@@ -1030,6 +1165,7 @@ class MultisitePanel extends HTMLElement {
     if (e.page === 'supply') return (this._supply(e.id) || {}).name || 'Anschluss';
     if (e.page === 'unassigned') return 'Nicht zugeordnet';
     if (e.page === 'check') return 'Einrichtung';
+    if (e.page === 'plan') return (this._plan(e.id) || {}).name || 'Lageplan';
     return '';
   }
   _navBar(title){
@@ -1217,7 +1353,9 @@ class MultisitePanel extends HTMLElement {
         <button class="row" data-act="push" data-page="check"><span class="row-ic soft">${ic('mdi:clipboard-check-outline')}</span><span class="row-main"><span class="row-title">Einrichtung prüfen</span><span class="row-sub">Etagen, Räume und Entitäten aus der Konfiguration</span></span><span class="row-end">${warn ? `<span class="pill warn">${ic('mdi:alert')}${warn}</span>` : `<span class="pill ok">${ic('mdi:check')}OK</span>`}</span>${ic('mdi:chevron-right', 'chev')}</button>
       </div><p class="hint">Nur für Admins sichtbar.</p>`);
     }
-    return {body: this._rootHeader('Orte', `${this._sites.length} ${this._sites.length === 1 ? 'Standort' : 'Standorte'} · ${total} Räume`, {noSite: true}) + `<div class="sites">${cards}</div>${this._cfg.supplies.length ? '<p class="hint">Die farbigen Symbole zeigen, welche Anschlüsse einen Standort versorgen.</p>' : ''}` + extra};
+    const plans = this._plansFor(null);
+    const planSec = plans.length ? this._sec(plans.length === 1 ? 'Lageplan' : 'Lagepläne', `<div class="plans">${plans.map(p => this._planCard(p)).join('')}</div>`) : '';
+    return {body: this._rootHeader('Orte', `${this._sites.length} ${this._sites.length === 1 ? 'Standort' : 'Standorte'} · ${total} Räume`, {noSite: true}) + planSec + `<div class="sites">${cards}</div>${this._cfg.supplies.length ? '<p class="hint">Die farbigen Symbole zeigen, welche Anschlüsse einen Standort versorgen.</p>' : ''}` + extra};
   }
 
   _pSite(id){
@@ -1236,10 +1374,12 @@ class MultisitePanel extends HTMLElement {
       return `<button class="rtile ${lit ? 'lit' : ''} ${span}" data-act="push" data-page="room" data-id="${esc(aid)}"><span class="rtile-ic">${ic(this._areaIcon(aid))}</span><span class="rtile-name">${esc(this._areaName(aid))}</span><span class="rtile-meta">${esc(meta)}</span></button>`;
     }).join('')}</div>`)).join('');
     const sups = this._cfg.supplies.filter(x => x.sites.includes(id));
+    const plans = this._plansFor(id);
     return {
       nav: this._navBar(s.short),
       body: this._pushedHeader(s.name, s.role || 'Standort') + pills
         + (on.length ? `<button class="btn ghost wide" data-act="lights-off-site" data-id="${esc(id)}">${ic('mdi:power')}Alle Lichter hier aus</button>` : '')
+        + (plans.length ? `<div class="plans">${plans.map(p => this._planCard(p)).join('')}</div>` : '')
         + (groups || `<div class="card empty">Für diesen Standort sind in Home Assistant noch keine Räume hinterlegt. Lege unter Einstellungen → Bereiche eine Etage mit Räumen an und trage die Etage in der Konfiguration bei <code>${esc(s.id)}</code> ein.</div>`)
         + (sups.length ? this._sec('Versorgt durch', `<div class="list">${sups.map(x => this._supplyRow(x)).join('')}</div>`) : ''),
     };
@@ -1418,6 +1558,92 @@ class MultisitePanel extends HTMLElement {
     ].join('')};
   }
 
+  /* ---------- Lagepläne ---------- */
+  _plan(id){ return this._cfg.plans.find(p => p.id === id); }
+  /* siteId = null: alle sichtbaren (Orte-Übersicht); Pläne ohne Standort nur für Benutzer, die alles sehen */
+  _plansFor(siteId){
+    const all = this._sites.length === this._cfg.sites.length;
+    return this._cfg.plans.filter(p => siteId ? p.site === siteId : p.site ? this._sites.some(s => s.id === p.site) : all);
+  }
+  /* Punkte ohne Entität oder an einem Standort, den der Benutzer nicht sieht, fallen weg */
+  _planPoints(p){
+    const h = this._hass;
+    return p.points.filter(pt => { if (!h.states[pt.entity]) return false; const s = this._index.entSite[pt.entity]; return !s || this._sites.some(x => x.id === s); });
+  }
+  _planCard(p){
+    const pts = this._planPoints(p), on = pts.filter(x => this._isOn(x.entity)).length, src = this._signedSrc(p.file);
+    const sub = pts.length ? `${pts.length} ${pts.length === 1 ? 'Licht' : 'Lichter'} · ${on ? `${on} an` : 'alle aus'}` : 'noch keine Lichter';
+    return `<button class="plan-card" data-act="push" data-page="plan" data-id="${esc(p.id)}"><span class="plan-thumb"><img data-bild="${esc(p.file)}" alt="" ${src ? `src="${esc(src)}"` : ''}></span><span class="plan-meta"><span class="row-main"><span class="row-title">${esc(p.name)}</span><span class="row-sub">${esc(sub)}</span></span>${ic('mdi:chevron-right', 'chev')}</span></button>`;
+  }
+  _pPlan(id){
+    const p = this._plan(id);
+    if (!p) return {nav: this._navBar('Lageplan'), body: '<div class="card empty">Diesen Lageplan gibt es nicht mehr.</div>'};
+    const ents = this._planPoints(p).map(x => x.entity), site = p.site && this._site(p.site);
+    const on = ents.filter(e => domainOf(e) === 'light' && this._isOn(e));
+    return {nav: this._navBar(p.name), body: [
+      this._pushedHeader(p.name, site ? site.short : 'Lageplan'),
+      `<section class="sec"><div class="plan-slot" data-plan-slot="${esc(p.id)}"></div><p class="hint">Tippen schaltet, gedrückt halten öffnet die Einstellungen. Mit zwei Fingern zoomen und verschieben.</p></section>`,
+      on.length ? `<button class="btn ghost wide" data-act="lights-off-plan" data-id="${esc(p.id)}">${ic('mdi:power')}Alle Lichter im Plan aus</button>` : '',
+      ents.length ? this._sec('Auf dem Plan', this._grid(ents, e => this._tile(e, {ctx: true}))) : '<div class="card empty">Auf diesem Plan sind noch keine Lichter. Im Editor unter Lagepläne lassen sie sich platzieren.</div>',
+    ].join('')};
+  }
+  _planMarkers(p){
+    return this._planPoints(p).map(pt => {
+      const st = this._hass.states[pt.entity], dom = domainOf(pt.entity), unav = st.state === 'unavailable', on = !unav && this._isOn(pt.entity);
+      const icon = pt.icon || this._entIcon(pt.entity) || (dom === 'light' ? (on ? 'mdi:lightbulb-on' : 'mdi:lightbulb-outline') : dom === 'fan' ? 'mdi:fan' : 'mdi:power-socket-de');
+      const name = pt.name || this._name(pt.entity);
+      return `<button class="pm ${on ? 'on' : ''} ${unav ? 'unav' : ''}" data-tile="${esc(pt.entity)}" style="left:${pt.x}%;top:${pt.y}%;--c:var(${dom === 'light' ? '--c-light' : '--c-switch'})" aria-label="${esc(name)}: ${on ? 'an' : 'aus'}" aria-pressed="${on}"><span class="pm-ic">${ic(icon)}</span><span class="pm-l">${esc(name)}</span></button>`;
+    }).join('');
+  }
+  /* Nach jedem Neuzeichnen: Bilder setzen und die Plan-Ansicht (bleibt als Element erhalten) wieder einhängen */
+  _mountPlans(){
+    for (const img of this.$screen.querySelectorAll('img[data-bild]')) this._setBild(img, img.dataset.bild);
+    for (const slot of this.$screen.querySelectorAll('[data-plan-slot]')){
+      const p = this._plan(slot.dataset.planSlot); if (!p) continue;
+      const v = this._planViews[p.id] || (this._planViews[p.id] = new PlanView(this));
+      v.update(p, this._planMarkers(p));
+      slot.appendChild(v.el);
+      v.layout();
+      this._setBild(v.img, p.file);
+    }
+  }
+  /* Die Bilder liegen geschützt in HA. <img> bekommt eine signierte Adresse; sie gilt eine Woche und wird gemerkt,
+     damit der Browser das (große) Bild aus dem Zwischenspeicher nehmen kann. */
+  _bildKey(file){ return `msp-bild-${(this._hass.user && this._hass.user.id) || 'x'}-${file}`; }
+  _signedSrc(file){
+    let c = this._signed[file];
+    if (!c){ try { c = JSON.parse(lsGet(this._bildKey(file)) || 'null'); } catch (e){ c = null; } if (c) this._signed[file] = c; }
+    return c && c.url && c.exp > Date.now() ? c.url : '';
+  }
+  _bildUrl(file){
+    const src = this._signedSrc(file);
+    if (src) return Promise.resolve(src);
+    if (this._signed[file] && this._signed[file].p) return this._signed[file].p;
+    const p = this._hass.callWS({type: 'auth/sign_path', path: `${BILD_URL}/${encodeURIComponent(file)}`, expires: 7 * 86400}).then(r => {
+      const c = {url: r.path, exp: Date.now() + 6 * 86400000};
+      this._signed[file] = c; lsSet(this._bildKey(file), JSON.stringify(c));
+      return c.url;
+    }).catch(e => { delete this._signed[file]; throw e; });
+    this._signed[file] = {p};
+    return p;
+  }
+  _setBild(img, file){
+    if (!img._msp){
+      img._msp = true;
+      img.addEventListener('load', () => { img.classList.remove('fehlt'); this._bildGeladen(img); });
+      img.addEventListener('error', () => {
+        // Signatur abgelaufen oder ungültig: einmal neu signieren
+        if (img.dataset.neu){ img.classList.add('fehlt'); this._bildGeladen(img); return; }
+        img.dataset.neu = '1'; delete this._signed[file]; lsSet(this._bildKey(file), 'null');
+        this._bildUrl(file).then(u => { img.src = u; }).catch(() => img.classList.add('fehlt'));
+      });
+    }
+    const src = this._signedSrc(file);
+    if (src){ if (img.getAttribute('src') !== src) img.src = src; return; }
+    this._bildUrl(file).then(u => { img.src = u; }).catch(() => { img.classList.add('fehlt'); this._bildGeladen(img); });
+  }
+  _bildGeladen(img){ const v = Object.values(this._planViews).find(x => x.img === img); if (v) v.loaded(); }
+
   /* ---------- Diagramm ---------- */
   _chart(c){
     const W = 340, H = 190, ml = 30, mr = 10, mt = 16, mb = 22, pw = W - ml - mr, ph = H - mt - mb;
@@ -1530,7 +1756,7 @@ class MultisitePanel extends HTMLElement {
         else if (dom === 'event'){ text = 'ausgelöst'; icon = 'mdi:bell-ring'; }
         else if (e.state){ text = e.state; }
         if (!text || !e.when) return null;
-        return {when: e.when, time: hhmm(new Date(e.when * 1000)), title: st.attributes.friendly_name || e.entity_id, sub: text, icon};
+        return {when: e.when, time: hhmm(new Date(e.when * 1000)), title: entName(this._hass, st), sub: text, icon};
       }).filter(Boolean).sort((a, b) => b.when - a.when).slice(0, 15);
       this._log = {at: Date.now(), items};
     } catch (e){ this._log = {at: Date.now(), items: []}; }
@@ -1614,7 +1840,7 @@ class MultisitePanel extends HTMLElement {
       }
       case 'cam': {
         const st = h.states[id]; if (!st) return '';
-        const name = (this._cfg.cameras.find(c => c.entity === id) || {}).name || st.attributes.friendly_name || id;
+        const name = (this._cfg.cameras.find(c => c.entity === id) || {}).name || entName(this._hass, st);
         return this._sheetHead(this._ctxOf(id) || 'Kamera', name) + this._camTile({eid: id, name}, 'big') + `<button class="btn wide" data-act="more" data-id="${esc(id)}">${ic('mdi:play')}Live-Bild öffnen</button>`;
       }
       default: return '';
@@ -1794,6 +2020,7 @@ class MultisitePanel extends HTMLElement {
         case 'lights-off-site': this._lightsOff(this._lightsOn(id)); break;
         case 'lights-off-room': this._lightsOff(((this._index.byArea[id] || {}).light || []).filter(e => this._isOn(e))); break;
         case 'lights-off-filter': this._lightsOff(this._lightsOn()); break;
+        case 'lights-off-plan': { const p = this._plan(id); if (p) this._lightsOff(this._planPoints(p).map(x => x.entity).filter(e => domainOf(e) === 'light' && this._isOn(e))); break; }
         case 'therm-step': {
           const tid = this._st.sheet && this._st.sheet.id, c = tid && this._climate(tid);
           if (!c || c.target == null) break;

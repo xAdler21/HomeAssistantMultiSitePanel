@@ -4,7 +4,7 @@
  * Speichert über die Integration direkt in Home Assistant; die App auf allen Geräten aktualisiert sich sofort.
  * Keine Build-Schritte, keine Abhängigkeiten. Unbekannte Schlüssel bleiben beim Bearbeiten erhalten.
  */
-const VERSION = '0.2.0';
+const VERSION = '0.3.0';
 
 /* ---------- Hilfsfunktionen ---------- */
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
@@ -18,7 +18,15 @@ const lsGet = k => { try { return localStorage.getItem(k); } catch (e) { return 
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* egal */ } };
 const lsDel = k => { try { localStorage.removeItem(k); } catch (e) { /* egal */ } };
 const isEmpty = v => v === undefined || v === null || v === '' || (Array.isArray(v) && !v.length) || (typeof v === 'object' && !Array.isArray(v) && !Object.keys(v).length);
-const ENTITY_RE = /^(sensor|binary_sensor|switch|light|cover|climate|lock|camera|scene|script|button|input_[a-z_]+|select|weather|media_player|fan|event|number|counter|timer|person|update|valve|water_heater|alarm_control_panel)\.\w+$/;
+/* Anzeigename wie in HA: ab 2026.4 über formatEntityName, friendly_name ist zur Abkündigung vorgesehen */
+function entName(h, st){
+  if (!st) return '';
+  if (h && typeof h.formatEntityName === 'function'){
+    try { const n = h.formatEntityName(st, [{type: 'device'}, {type: 'entity'}], {separator: ' '}); if (n) return String(n); } catch (e) { /* ältere Frontends */ }
+  }
+  return st.attributes.friendly_name || st.entity_id;
+}
+const ENTITY_RE =/^(sensor|binary_sensor|switch|light|cover|climate|lock|camera|scene|script|button|input_[a-z_]+|select|weather|media_player|fan|event|number|counter|timer|person|update|valve|water_heater|alarm_control_panel)\.\w+$/;
 
 /* Leere Werte entfernen, damit Konfiguration und YAML aufgeräumt bleiben */
 function clean(v){
@@ -34,7 +42,8 @@ function clean(v){
 /* Kurzformen aus YAML in die Form bringen, die die Formulare erwarten */
 function prep(raw){
   const c = clone(raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {});
-  for (const k of ['standorte', 'versorgung', 'geraete', 'szenen', 'benutzer', 'zugang', 'kameras', 'ereignisse', 'favoriten', 'ausblenden']) if (c[k] != null) c[k] = arr(c[k]);
+  for (const k of ['standorte', 'versorgung', 'geraete', 'szenen', 'benutzer', 'zugang', 'kameras', 'ereignisse', 'favoriten', 'ausblenden', 'plaene']) if (c[k] != null) c[k] = arr(c[k]);
+  arr(c.plaene).forEach(p => { if (p.punkte != null) p.punkte = arr(p.punkte); if (p.standort != null) p.standort = String(p.standort); });
   if (typeof c.heizsaison === 'string') c.heizsaison = {entity: c.heizsaison};
   for (const k of ['zugang', 'kameras']) if (c[k]) c[k] = c[k].map(x => typeof x === 'string' ? {entity: x} : x);
   arr(c.standorte).forEach(s => { if (s.id != null) s.id = String(s.id); for (const k of ['etagen', 'bereiche']) if (s[k] != null) s[k] = arr(s[k]); });
@@ -44,7 +53,28 @@ function prep(raw){
   return c;
 }
 
-const getIn = (o, p) => p.reduce((x, k) => x == null ? undefined : x[k], o);
+/* Bildgröße ermitteln und sehr große Bilder verkleinern (Canvas, JPEG). iOS erlaubt nur kleinere Canvas, daher Stufen. */
+const ladeBild = blob => new Promise((res, rej) => {
+  const url = URL.createObjectURL(blob), im = new Image();
+  im.onload = () => { URL.revokeObjectURL(url); res(im); };
+  im.onerror = () => { URL.revokeObjectURL(url); rej(new Error('das Bild lässt sich nicht öffnen')); };
+  im.src = url;
+});
+async function bildVorbereiten(file){
+  const im = await ladeBild(file), w = im.naturalWidth, h = im.naturalHeight;
+  if (Math.max(w, h) <= 8192 && file.size <= 30 * 1024 * 1024) return {blob: file, w, h};
+  for (const max of [8192, 6144, 4096]){
+    const k = Math.min(1, max / Math.max(w, h)), cw = Math.round(w * k), ch = Math.round(h * k);
+    const c = document.createElement('canvas'); c.width = cw; c.height = ch;
+    const g = c.getContext('2d'); if (!g) continue;
+    g.drawImage(im, 0, 0, cw, ch);
+    const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.9));
+    if (blob && blob.size <= 40 * 1024 * 1024) return {blob, w: cw, h: ch};
+  }
+  throw new Error('das Bild ist zu groß zum Verkleinern');
+}
+
+const getIn = (o, p) =>p.reduce((x, k) => x == null ? undefined : x[k], o);
 function setIn(o, p, v){
   let x = o;
   for (let i = 0; i < p.length - 1; i++){
@@ -66,7 +96,7 @@ function relinkSite(c, from, to){
   const fixList = l => l.map(fix).filter(x => x !== undefined);
   const fixOne = x => { if (x && x.standort != null){ x.standort = fix(x.standort); if (x.standort === undefined) delete x.standort; } };
   arr(c.versorgung).forEach(s => { if (s.standorte) s.standorte = fixList(s.standorte); arr(s.versorgt).forEach(fixOne); });
-  for (const k of ['geraete', 'szenen', 'zugang', 'kameras']) arr(c[k]).forEach(fixOne);
+  for (const k of ['geraete', 'szenen', 'zugang', 'kameras', 'plaene']) arr(c[k]).forEach(fixOne);
   arr(c.benutzer).forEach(u => { if (u.standorte) u.standorte = fixList(u.standorte); });
 }
 
@@ -90,6 +120,7 @@ const isStrom = s => (s.art || 'strom') === 'strom';
 const SECTIONS = [
   {id: 'allgemein', label: 'Allgemein', icon: 'mdi:tune-variant', tab: 'start', desc: 'Wetter, Favoriten und Darstellung der Startseite.'},
   {id: 'standorte', label: 'Standorte', icon: 'mdi:home-group', tab: 'orte', list: 'standorte', desc: 'Jeder Standort fasst Etagen und Räume aus Home Assistant zusammen.'},
+  {id: 'plaene', label: 'Lagepläne', icon: 'mdi:map-outline', tab: 'orte', list: 'plaene', desc: 'Ein Luftbild oder eine Ansicht eures Areals, darauf die Lichter als Knöpfe. Das Bild bleibt in Home Assistant und ist nur angemeldet abrufbar.'},
   {id: 'versorgung', label: 'Versorgung', icon: 'mdi:transmission-tower', tab: 'versorgung', list: 'versorgung', desc: 'Ein Eintrag pro Anschluss: Strom, Gas, Wasser, Heizung, Internet.'},
   {id: 'heizung', label: 'Heizung', icon: 'mdi:thermostat', tab: 'heizung', desc: 'Umschalter zwischen Winter- und Sommerbetrieb.'},
   {id: 'geraete', label: 'Geräte', icon: 'mdi:washing-machine', tab: 'start', list: 'geraete', desc: 'Wasch- und Spülmaschine & Co. erscheinen auf der Startseite, solange sie laufen oder fertig sind.'},
@@ -147,7 +178,7 @@ const LISTS = {
     icon: s => s.icon || 'mdi:home',
     fields: [
       G('Name', [
-        T('name', 'Name', {req: true, ph: 'z. B. Mangoldinger Straße 1'}),
+        T('name', 'Name', {req: true, ph: 'z. B. Lindenstraße 4'}),
         T('kurz', 'Kurzname', {ph: 'wie Name', help: 'Für Überschriften und Kacheln'}),
         T('kuerzel', 'Kürzel', {ph: 'wie Kurzname', help: 'Ganz kurz, z. B. „Firma“ oder „1a“'}),
         T('rolle', 'Rolle', {ph: 'z. B. Wohnhaus'}),
@@ -161,6 +192,21 @@ const LISTS = {
       G('Technisch', [T('id', 'ID', {siteId: true, help: 'Interner Name für Verweise aus Versorgung, Szenen und Benutzern. Beim Ändern werden alle Verweise mitgeändert.'})]),
     ],
   },
+  plaene: {
+    add: 'Lageplan',
+    neu: c => ({id: uniqueId(c.plaene, 'plan'), name: 'Neuer Lageplan'}),
+    title: p => p.name || 'Lageplan',
+    sub: p => { const n = arr(p.punkte).length; return p.bild ? `${n} ${n === 1 ? 'Licht' : 'Lichter'}` : 'noch ohne Bild'; },
+    icon: () => 'mdi:map-outline',
+    fields: [
+      G('Plan', [
+        T('name', 'Name', {req: true, ph: 'z. B. Areal'}),
+        {t: 'site', k: 'standort', l: 'Standort', help: 'Erscheint dann auch beim Standort. Ohne Standort nur in der Orte-Übersicht (und nur für Benutzer, die alles sehen).'},
+      ]),
+      G('Bild und Lichter', [{t: 'plan', l: 'Lageplan', wide: true}], {help: 'Ein Luftbild, Drohnenfoto oder eine Ansicht aus dem 3D-Modell. Gut sind 4000 bis 8000 Pixel Breite; größere Bilder werden beim Hochladen verkleinert.'}),
+      G('Technisch', [T('id', 'ID')]),
+    ],
+  },
   versorgung: {
     add: 'Anschluss',
     neu: c => ({id: uniqueId(c.versorgung, 'anschluss'), art: 'strom', name: 'Neuer Anschluss'}),
@@ -171,7 +217,7 @@ const LISTS = {
     fields: [
       G('Anschluss', [
         S('art', 'Art', ART), T('name', 'Name', {req: true}),
-        T('ort', 'Ort', {ph: 'z. B. Ammerhofweg 2'}), T('beschreibung', 'Untertitel', {ph: 'automatisch aus Ort und Standorten'}),
+        T('ort', 'Ort', {ph: 'z. B. Birkenweg 7'}), T('beschreibung', 'Untertitel', {ph: 'automatisch aus Ort und Standorten'}),
         {t: 'icon', k: 'icon', l: 'Symbol', phFrom: s => art(s.art)[2]},
         {t: 'sites', k: 'standorte', l: 'Gehört zu den Standorten', wide: true, help: 'Bestimmt, bei welchen Standorten der Anschluss erscheint'},
       ]),
@@ -404,6 +450,29 @@ input.chip-add{width:auto;flex:1;min-width:170px;height:32px;border-radius:999px
 .pill .i{--mdc-icon-size:14px}
 .pill.warn{background:var(--warn-bg);color:var(--warn)}
 
+.pe{gap:10px}
+.pe-drop{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;min-height:200px;padding:24px;border:2px dashed var(--line);border-radius:14px;background:var(--bg);color:var(--fg-2);text-align:center;cursor:pointer}
+.pe-drop:hover{border-color:var(--accent);color:var(--accent)}
+.pe-drop .i{--mdc-icon-size:36px}
+.pe-drop b{font-size:15px;color:var(--fg)}
+.pe-drop span{font-size:12.5px;max-width:46ch}
+.pe-bar{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.pe-info{flex:1;font-size:12px;color:var(--fg-3);font-variant-numeric:tabular-nums}
+.pe-scroll{max-height:70vh;overflow:auto;border-radius:12px;background:#1A1D1B;overscroll-behavior:contain}
+.pe-canvas{position:relative;min-width:100%;user-select:none;-webkit-user-select:none;touch-action:none}
+.pe-canvas.arming{cursor:crosshair}
+.pe-canvas img{position:absolute;inset:0;width:100%;height:100%;display:block;pointer-events:none}
+.pe-pts{position:absolute;inset:0}
+.pe-pt{position:absolute;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:2px;cursor:grab;touch-action:none}
+.pe-pt .i{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;background:#F0B321;color:#111;border:2px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.45);--mdc-icon-size:18px}
+.pe-pt span{font-size:11px;font-weight:600;color:#fff;background:rgba(0,0,0,.65);padding:1px 6px;border-radius:6px;white-space:nowrap;position:absolute;top:100%;margin-top:2px;pointer-events:none}
+.pe-pt.drag{cursor:grabbing;z-index:2}
+.pe-pt.drag .i{transform:scale(1.15)}
+.pe-pt.armed .i{background:var(--accent);color:var(--accent-fg);animation:pePulse 1s ease-in-out infinite}
+.pe-pt.bad .i{background:var(--crit);color:#fff}
+@keyframes pePulse{50%{box-shadow:0 0 0 8px var(--accent-tint)}}
+.help.pe-armed{color:var(--accent);font-weight:600}
+.mrow.armed{border-color:var(--accent)}
 textarea.code{min-height:420px;height:min(62vh,680px);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:1.5;white-space:pre;tab-size:2}
 .code-act{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .code-msg{font-size:13px;color:var(--fg-2)}
@@ -601,7 +670,7 @@ class MultisiteEditor extends HTMLElement {
     if (!from.length || !this._draft) return;
     to.push(JSON.stringify(this._draft));
     this._draft = JSON.parse(from.pop());
-    this._lastType = 0; this._codeLoaded = false;
+    this._lastType = 0; this._codeLoaded = false; this._peArmed = null;
     const s = this._section();
     if (s.list && this._item != null && !arr(this._draft[s.list])[this._item]) this._item = null;
     this._changed(true);
@@ -628,6 +697,7 @@ class MultisiteEditor extends HTMLElement {
       let page = null, id = null;
       if (it && s.list === 'standorte'){ page = 'site'; id = String(it.id ?? `standort_${this._item + 1}`); }
       if (it && s.list === 'versorgung'){ page = 'supply'; id = String(it.id ?? `versorgung_${this._item + 1}`); }
+      if (it && s.list === 'plaene' && it.bild){ page = 'plan'; id = String(it.id ?? `plan_${this._item + 1}`); }
       this._pvNav = {tab: s.tab, page, id};
     }
     this._schedulePreview(0);
@@ -686,6 +756,7 @@ class MultisiteEditor extends HTMLElement {
     else if (s.list) html = this._itemView(s);
     else html = this._head(s) + this._fields(PAGES[s.id], []);
     this.$main.innerHTML = `<div class="main-in">${html}</div>`;
+    this._mountImages();
     this.$main.scrollTop = keep;
     this._mainKey = key;
     if (s.id === 'code' && !this._codeLoaded) this._loadYaml();
@@ -768,6 +839,7 @@ class MultisiteEditor extends HTMLElement {
       case 'entities': return wrap(this._entitiesEditor(path, arr(v), f.dom), true);
       case 'rows': return wrap(this._rowsEditor(f, path, arr(v)), true);
       case 'user': return wrap(this._userSelect(base, obj), true);
+      case 'plan': return this._planEditor(base, obj);
       default: return '';
     }
   }
@@ -776,7 +848,7 @@ class MultisiteEditor extends HTMLElement {
     if (!v) return '';
     const st = this._hass.states[v];
     if (!st) return `<span class="bad">${ic('mdi:alert')}Gibt es in Home Assistant nicht</span>`;
-    return `<span class="ok">${esc(st.attributes.friendly_name || v)} · ${esc(this._fmt(st))}</span>`;
+    return `<span class="ok">${esc(entName(this._hass, st))} · ${esc(this._fmt(st))}</span>`;
   }
   _missing(o){
     let n = 0;
@@ -833,7 +905,7 @@ class MultisiteEditor extends HTMLElement {
   }
   _entitiesEditor(path, items, dom){
     const P = pj(path);
-    const chips = items.map((e, i) => { const st = this._hass.states[e]; return `<span class="chip on ${st ? '' : 'bad'}" title="${esc(st ? e : `${e} gibt es nicht`)}">${esc(st ? st.attributes.friendly_name || e : e)}<button data-act="rm" data-path="${P}" data-i="${i}" aria-label="Entfernen">${ic('mdi:close')}</button></span>`; }).join('');
+    const chips = items.map((e, i) => { const st = this._hass.states[e]; return `<span class="chip on ${st ? '' : 'bad'}" title="${esc(st ? e : `${e} gibt es nicht`)}">${esc(st ? entName(this._hass, st) : e)}<button data-act="rm" data-path="${P}" data-i="${i}" aria-label="Entfernen">${ic('mdi:close')}</button></span>`; }).join('');
     return `${chips ? `<div class="chips">${chips}</div>` : ''}<div class="inp"><input type="text" data-add="entity" data-pick="entity" data-dom="${esc(dom || '')}" data-path="${P}" placeholder="+ Entität suchen und hinzufügen" spellcheck="false" autocomplete="off" aria-label="Entität hinzufügen"></div>`;
   }
   _rowsEditor(f, path, items){
@@ -846,6 +918,81 @@ class MultisiteEditor extends HTMLElement {
     if (!users.length) return `<input type="text" data-path="${pj([...base, 'name'])}" value="${esc(obj.name ?? '')}" placeholder="Name wie in Home Assistant" aria-label="Benutzer">`;
     const cur = users.find(u => (obj.id && u.id === obj.id) || (obj.name && lc(u.name) === lc(obj.name)));
     return `<select data-path="${pj(base)}" data-type="user" aria-label="Benutzer"><option value="">— Benutzer wählen —</option>${users.map(u => `<option value="${esc(u.id)}" ${cur && cur.id === u.id ? 'selected' : ''}>${esc(u.name)}${u.admin ? ' (Admin)' : ''}</option>`).join('')}${!cur && (obj.name || obj.id) ? `<option value="" selected>${esc(obj.name || obj.id)} (unbekannt)</option>` : ''}</select>`;
+  }
+
+  /* ---------- Lageplan: Bild hochladen, Lichter platzieren ---------- */
+  _planEditor(base, obj){
+    const P = pj(base), pp = [...base, 'punkte'], pts = arr(obj.punkte), armed = this._peArmed;
+    const upload = label => `<label class="btn ghost">${ic('mdi:image-plus')}${label}<input type="file" accept="image/jpeg,image/png,image/webp" data-upload="${P}" hidden></label>`;
+    let top;
+    if (this._uploading) top = '<div class="pe-drop"><b>Wird hochgeladen …</b><span>Große Bilder brauchen einen Moment.</span></div>';
+    else if (!obj.bild) top = `<label class="pe-drop">${ic('mdi:image-plus')}<b>Bild hochladen</b><span>Luftbild, Drohnenfoto oder Ansicht des 3D-Modells · JPG, PNG oder WebP · bis 40 MB</span><input type="file" accept="image/jpeg,image/png,image/webp" data-upload="${P}" hidden></label>`;
+    else {
+      const w = obj.breite || 4, h = obj.hoehe || 3, z = this._peZoom || 1;
+      const name = pt => pt.name || (this._hass.states[pt.entity] ? entName(this._hass, this._hass.states[pt.entity]) : pt.entity);
+      const markers = pts.map((pt, i) => `<div class="pe-pt ${armed === i ? 'armed' : ''} ${this._hass.states[pt.entity] ? '' : 'bad'}" data-pt="${i}" style="left:${Number(pt.x) || 0}%;top:${Number(pt.y) || 0}%">${ic(pt.icon || (domainOf(pt.entity) === 'light' ? 'mdi:lightbulb' : 'mdi:power-socket-de'))}<span>${esc(name(pt))}</span></div>`).join('');
+      const hint = armed != null && pts[armed] ? `Jetzt ins Bild tippen, wo „${esc(name(pts[armed]))}“ sitzt. Esc bricht ab.` : 'Punkte mit der Maus verschieben. Neues Licht: unten suchen, dann ins Bild tippen.';
+      top = `<div class="pe-bar"><button class="ib" data-act="pe-zoom" data-d="-1" title="Kleiner" aria-label="Kleiner" ${z > 1 ? '' : 'disabled'}>${ic('mdi:magnify-minus-outline')}</button><button class="ib" data-act="pe-zoom" data-d="1" title="Größer" aria-label="Größer" ${z < 4 ? '' : 'disabled'}>${ic('mdi:magnify-plus-outline')}</button><span class="pe-info">${w} × ${h} px</span>${upload('Bild ersetzen')}</div>
+        <div class="pe-scroll"><div class="pe-canvas ${armed != null ? 'arming' : ''}" data-pe="${P}" style="width:${z * 100}%;aspect-ratio:${w} / ${h}"><img data-bild="${esc(obj.bild)}" alt="" draggable="false"><div class="pe-pts">${markers}</div></div></div>
+        <p class="help ${armed != null ? 'pe-armed' : ''}">${hint}</p>`;
+    }
+    const rows = pts.map((pt, i) => {
+      const st = this._hass.states[pt.entity];
+      return `<div class="mrow ${st ? '' : 'bad'} ${armed === i ? 'armed' : ''}"><span class="mrow-ic">${ic(pt.icon || (domainOf(pt.entity) === 'light' ? 'mdi:lightbulb' : 'mdi:power-socket-de'))}</span><span class="mrow-main"><b>${esc(st ? entName(this._hass, st) : pt.entity)}</b><small>${st ? esc(pt.entity) : 'gibt es in Home Assistant nicht'}</small></span><input type="text" data-path="${pj([...pp, i, 'name'])}" value="${esc(pt.name ?? '')}" placeholder="Beschriftung (optional)" aria-label="Beschriftung">${obj.bild ? `<button class="btn ghost" data-act="pe-arm" data-i="${i}">${ic('mdi:crosshairs-gps')}Platzieren</button>` : ''}<button class="ib sm danger" data-act="rm" data-path="${pj(pp)}" data-i="${i}" title="Entfernen" aria-label="Entfernen">${ic('mdi:close')}</button></div>`;
+    }).join('');
+    return `<div class="fld wide pe">${top}${rows ? `<div class="mrows">${rows}</div>` : ''}<div class="inp"><input type="text" data-add="point" data-pick="entity" data-dom="light,switch,fan,input_boolean" data-path="${pj(pp)}" placeholder="+ Licht suchen und auf den Plan setzen" spellcheck="false" autocomplete="off" aria-label="Licht hinzufügen"></div></div>`;
+  }
+  /* Bilder der Lagepläne sind geschützt; <img> bekommt eine signierte Adresse */
+  _bildUrl(file){
+    this._signed = this._signed || {};
+    if (!this._signed[file]) this._signed[file] = this._hass.callWS({type: 'auth/sign_path', path: `/api/multisite_panel/bild/${encodeURIComponent(file)}`, expires: 86400}).then(r => r.path).catch(e => { delete this._signed[file]; throw e; });
+    return this._signed[file];
+  }
+  _mountImages(){
+    for (const img of this.$main.querySelectorAll('img[data-bild]')){
+      this._bildUrl(img.dataset.bild).then(u => { img.src = u; }).catch(() => { img.alt = 'Bild nicht gefunden'; });
+    }
+  }
+  async _upload(file, base){
+    if (!file) return;
+    if (!/^image\/(jpeg|png|webp)$/.test(file.type)){ this._toast('Bitte ein JPG-, PNG- oder WebP-Bild wählen', true); return; }
+    this._uploading = true; this._renderMain();
+    try {
+      let {blob, w, h} = await bildVorbereiten(file);
+      if (blob.size > 40 * 1024 * 1024) throw new Error('auch verkleinert noch größer als 40 MB');
+      const res = await this._hass.fetchWithAuth('/api/multisite_panel/bild', {method: 'POST', headers: {'Content-Type': blob.type}, body: blob});
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.message || `Fehler ${res.status}`);
+      const o = getIn(this._draft, base);
+      if (o){ this._snap(); o.bild = j.datei; o.breite = w; o.hoehe = h; }
+      this._toast('Bild hochgeladen – jetzt die Lichter platzieren');
+    } catch (e){ this._toast(`Hochladen fehlgeschlagen: ${(e && e.message) || e}`, true); }
+    this._uploading = false; this._peZoom = 1;
+    this._changed(true);
+  }
+  /* Punkte ziehen bzw. das ausgewählte Licht per Tippen platzieren */
+  _peDown(ev){
+    const canvas = ev.target.closest('[data-pe]'); if (!canvas) return;
+    const base = JSON.parse(canvas.dataset.pe), list = getIn(this._draft, [...base, 'punkte']);
+    if (!Array.isArray(list)) return;
+    const at = e => { const r = canvas.getBoundingClientRect(); return {x: Math.round(Math.min(100, Math.max(0, (e.clientX - r.left) / r.width * 100)) * 100) / 100, y: Math.round(Math.min(100, Math.max(0, (e.clientY - r.top) / r.height * 100)) * 100) / 100}; };
+    const el = ev.target.closest('[data-pt]');
+    if (this._peArmed != null && list[this._peArmed]){
+      ev.preventDefault();
+      this._snap(); Object.assign(list[this._peArmed], at(ev)); this._peArmed = null; this._changed(true);
+      return;
+    }
+    if (!el) return;
+    ev.preventDefault();
+    const i = +el.dataset.pt; let moved = false;
+    el.setPointerCapture(ev.pointerId); el.classList.add('drag');
+    const move = e => {
+      const p = at(e);
+      if (!moved){ moved = true; this._snap(); }
+      Object.assign(list[i], p); el.style.left = `${p.x}%`; el.style.top = `${p.y}%`;
+    };
+    const up = () => { el.removeEventListener('pointermove', move); el.removeEventListener('pointerup', up); el.removeEventListener('pointercancel', up); el.classList.remove('drag'); if (moved) this._changed(); };
+    el.addEventListener('pointermove', move); el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up);
   }
 
   /* ---------- Auswahlliste für Entitäten und Symbole ---------- */
@@ -864,7 +1011,7 @@ class MultisiteEditor extends HTMLElement {
       const doms = (inp.dataset.dom || '').split(',').filter(Boolean), toks = q.split(/\s+/).filter(Boolean), states = this._hass.states;
       items = Object.keys(states)
         .filter(eid => !doms.length || doms.includes(domainOf(eid)))
-        .map(eid => ({eid, name: String(states[eid].attributes.friendly_name || eid)}))
+        .map(eid => ({eid, name: entName(this._hass, states[eid])}))
         .filter(x => toks.every(t => x.eid.includes(t) || lc(x.name).includes(t)))
         .sort((a, b) => a.name.localeCompare(b.name, 'de'))
         .slice(0, 60)
@@ -872,7 +1019,7 @@ class MultisiteEditor extends HTMLElement {
     }
     this._pickItems = items;
     if (!items.length){ this.$dd.hidden = true; return; }
-    this._pickAct = Math.max(0, Math.min(this._pickAct, items.length - 1));
+    this._pickAct = Math.max(0, Math.min(this._pickAct || 0, items.length - 1));
     this.$dd.className = `dd ${kind}`;
     this.$dd.innerHTML = items.map((it, i) => `<div class="dd-i ${i === this._pickAct ? 'act' : ''}" data-pi="${i}" role="option">${it.html}</div>`).join('');
     const r = inp.getBoundingClientRect(), hr = this.$ed.getBoundingClientRect();
@@ -891,6 +1038,16 @@ class MultisiteEditor extends HTMLElement {
   _pick(i){
     const inp = this._pickInput, it = this._pickItems && this._pickItems[i];
     if (!inp || !it) return;
+    if (inp.dataset.add === 'point'){
+      // Licht auf den Plan: erst in die Mitte, dann wartet der Editor auf einen Tipp ins Bild
+      const path = JSON.parse(inp.dataset.path), cur = arr(getIn(this._draft, path));
+      this._closePick();
+      this._snap(); setIn(this._draft, path, [...cur, {entity: it.v, x: 50, y: 50}]);
+      const o = getIn(this._draft, path.slice(0, -1));
+      this._peArmed = o && o.bild ? cur.length : null;
+      this._changed(true);
+      return;
+    }
     if (inp.dataset.add === 'entity'){
       const path = JSON.parse(inp.dataset.path), cur = arr(getIn(this._draft, path));
       this._closePick();
@@ -925,6 +1082,7 @@ class MultisiteEditor extends HTMLElement {
     });
     this.$dd.addEventListener('mousedown', ev => { ev.preventDefault(); const it = ev.target.closest('[data-pi]'); if (it) this._pick(+it.dataset.pi); });
     this.$main.addEventListener('scroll', () => { if (this._pickInput) this._updatePick(); }, {passive: true});
+    this.$main.addEventListener('pointerdown', ev => this._peDown(ev));
     // Listen per Ziehen sortieren
     const clear = () => this.$main.querySelectorAll('.dragging,.drop-before,.drop-after').forEach(x => x.classList.remove('dragging', 'drop-before', 'drop-after'));
     const target = ev => { const c = ev.target.closest && ev.target.closest('[data-drag]'); if (!c) return null; const b = c.getBoundingClientRect(); return {c, after: ev.clientY > b.top + b.height / 2}; };
@@ -966,6 +1124,7 @@ class MultisiteEditor extends HTMLElement {
       if (ev.key === 'Enter'){ ev.preventDefault(); this._pick(this._pickAct); return; }
       if (ev.key === 'Escape'){ ev.preventDefault(); this._closePick(); return; }
     }
+    if (ev.key === 'Escape' && this._peArmed != null){ this._peArmed = null; this._renderMain(); return; }
     if (t.dataset && t.dataset.add === 'string' && ev.key === 'Enter'){
       ev.preventDefault();
       const v = t.value.trim(); if (!v) return;
@@ -976,7 +1135,7 @@ class MultisiteEditor extends HTMLElement {
   }
   _onInput(t){
     if (t.id === 'yaml'){ this._yaml = t.value; return; }
-    if (t.dataset.pick){ this._pickInput = t; this._updatePick(); }
+    if (t.dataset.pick){ if (this._pickInput !== t){ this._pickInput = t; this._pickAct = 0; } this._updatePick(); }
     const type = t.dataset.type;
     if (t.dataset.add || !t.dataset.path || type === 'select' || type === 'bool' || type === 'user') return;
     const path = JSON.parse(t.dataset.path);
@@ -994,6 +1153,7 @@ class MultisiteEditor extends HTMLElement {
     this._changed();
   }
   _onChange(t){
+    if (t.dataset.upload){ const f = t.files && t.files[0]; t.value = ''; this._upload(f, JSON.parse(t.dataset.upload)); return; }
     if (t.dataset.change === 'pv-user'){
       this._pvUser = t.value;
       if (this._preview){ this._preview.hass = this._pvHass(); this._schedulePreview(0); }
@@ -1090,6 +1250,8 @@ class MultisiteEditor extends HTMLElement {
         if (!this._pvOpen){ this._pvOpen = true; this.$ed.classList.add('pv-open'); }
         break;
       case 'app': { const url = (this._panel && this._panel.config && this._panel.config.app) || '/zuhause'; history.pushState(null, '', url); window.dispatchEvent(new CustomEvent('location-changed')); break; }
+      case 'pe-zoom': this._peZoom = Math.min(4, Math.max(1, (this._peZoom || 1) + +el.dataset.d)); this._renderMain(); break;
+      case 'pe-arm': this._peArmed = this._peArmed === +el.dataset.i ? null : +el.dataset.i; this._renderMain(); break;
       case 'yaml-apply': this._applyYaml(); break;
       case 'yaml-reload': this._yaml = null; this._yamlMsg = ''; this._yamlBad = false; this._codeLoaded = false; this._renderMain(); break;
       default: break;
@@ -1102,6 +1264,7 @@ class MultisiteEditor extends HTMLElement {
   }
   _go(sec, item, changed = false){
     if (sec !== this._sec){ this._yaml = null; this._yamlMsg = ''; this._yamlBad = false; this._codeLoaded = false; }
+    if (sec !== this._sec || item !== this._item){ this._peArmed = null; this._peZoom = 1; }
     this._sec = sec; this._item = item; lsSet('msp-editor-sec', sec);
     this._closePick();
     if (changed) this._changed(true); else { this._renderSide(); this._renderMain(); }

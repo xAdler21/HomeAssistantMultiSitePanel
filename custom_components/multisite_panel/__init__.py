@@ -6,15 +6,20 @@ Websocket, die App bekommt Änderungen sofort mitgeteilt (kein Neustart nötig).
 
 from __future__ import annotations
 
+import hashlib
+from http import HTTPStatus
 import logging
 from pathlib import Path
+import re
+import time
 from typing import Any
 
+from aiohttp import web
 import voluptuous as vol
 import yaml
 
 from homeassistant.components import frontend, panel_custom, websocket_api
-from homeassistant.components.http import StaticPathConfig
+from homeassistant.components.http import HomeAssistantView, StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import config_validation as cv
@@ -27,6 +32,11 @@ from homeassistant.helpers.typing import ConfigType
 from homeassistant.util.yaml import dump as yaml_dump
 
 from .const import (
+    BILD_AUFHEBEN_SEKUNDEN,
+    BILD_MAX_BYTES,
+    BILD_ORDNER,
+    BILD_TYPEN,
+    BILD_URL,
     DOMAIN,
     EDITOR_ICON,
     EDITOR_TITLE,
@@ -44,15 +54,19 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 FRONTEND_DIR = Path(__file__).parent / "frontend"
+BILD_NAME = re.compile(r"plan-[0-9a-f]{16}\.(jpg|png|webp)")
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
-    """Einmal pro Start: Dateien ausliefern und Websocket-Befehle anmelden."""
+    """Einmal pro Start: Dateien ausliefern, Bild-Schnittstelle und Websocket-Befehle anmelden."""
     await hass.http.async_register_static_paths(
         [StaticPathConfig(STATIC_URL, str(FRONTEND_DIR), cache_headers=False)]
     )
+    ordner = Path(hass.config.path(BILD_ORDNER))
+    hass.http.register_view(BildHochladenView(hass, ordner))
+    hass.http.register_view(BildView(hass, ordner))
     for command in (ws_subscribe, ws_get, ws_save, ws_yaml_parse, ws_yaml_dump):
         websocket_api.async_register_command(hass, command)
     return True
@@ -82,6 +96,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             module_url=url("multisite-panel.js"),
             config={"speicher": True, "editor": f"/{EDITOR_URL}"},
             require_admin=False,
+            # Die App berücksichtigt Notch und Home-Leiste selbst; ohne das polstert HA (ab 2026.8) doppelt
+            handle_safe_area=True,
         )
         panels.append(PANEL_URL)
     except ValueError:
@@ -145,6 +161,73 @@ def _import_yaml(hass: HomeAssistant) -> dict[str, Any]:
     return {}
 
 
+class BildHochladenView(HomeAssistantView):
+    """Nimmt ein Bild für einen Lageplan entgegen (nur Admins, Bild roh im Body)."""
+
+    url = BILD_URL
+    name = "api:multisite_panel:bild:hochladen"
+    requires_auth = True
+
+    def __init__(self, hass: HomeAssistant, ordner: Path) -> None:
+        self.hass = hass
+        self.ordner = ordner
+
+    async def post(self, request: web.Request) -> web.Response:
+        user = request.get("hass_user")
+        if user is None or not user.is_admin:
+            return self.json_message("Nur Admins dürfen Bilder hochladen.", HTTPStatus.FORBIDDEN)
+        endung = BILD_TYPEN.get(request.content_type)
+        if endung is None:
+            return self.json_message("Nur JPG, PNG oder WebP.", HTTPStatus.UNSUPPORTED_MEDIA_TYPE)
+        # Gestreamt lesen, damit die allgemeine Grenze von 16 MB für Anfragen nicht greift
+        daten = bytearray()
+        async for stueck in request.content.iter_chunked(1 << 16):
+            daten.extend(stueck)
+            if len(daten) > BILD_MAX_BYTES:
+                return self.json_message("Das Bild ist größer als 40 MB.", HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
+        if not daten:
+            return self.json_message("Leere Datei.", HTTPStatus.BAD_REQUEST)
+        datei = f"plan-{hashlib.sha256(daten).hexdigest()[:16]}.{endung}"
+        await self.hass.async_add_executor_job(_bild_schreiben, self.ordner / datei, bytes(daten))
+        return self.json({"datei": datei, "bytes": len(daten)})
+
+
+class BildView(HomeAssistantView):
+    """Liefert ein Lageplan-Bild an angemeldete Benutzer (für <img> mit signierter Adresse)."""
+
+    url = BILD_URL + "/{datei}"
+    name = "api:multisite_panel:bild"
+    requires_auth = True
+
+    def __init__(self, hass: HomeAssistant, ordner: Path) -> None:
+        self.hass = hass
+        self.ordner = ordner
+
+    async def get(self, request: web.Request, datei: str) -> web.StreamResponse:
+        pfad = self.ordner / datei
+        if not BILD_NAME.fullmatch(datei) or not await self.hass.async_add_executor_job(pfad.is_file):
+            return web.Response(status=HTTPStatus.NOT_FOUND)
+        # Der Name enthält den Inhalt als Prüfsumme, die Datei ändert sich also nie
+        return web.FileResponse(pfad, headers={"Cache-Control": "private, max-age=31536000, immutable"})
+
+
+def _bild_schreiben(pfad: Path, daten: bytes) -> None:
+    pfad.parent.mkdir(parents=True, exist_ok=True)
+    pfad.write_bytes(daten)
+
+
+def _bilder_aufraeumen(ordner: Path, config: dict[str, Any]) -> None:
+    """Löscht Bilder, die kein Lageplan mehr verwendet und die älter als einen Tag sind."""
+    if not ordner.is_dir():
+        return
+    plaene = config.get("plaene") if isinstance(config.get("plaene"), list) else []
+    benutzt = {str(p.get("bild")) for p in plaene if isinstance(p, dict)}
+    grenze = time.time() - BILD_AUFHEBEN_SEKUNDEN
+    for pfad in ordner.iterdir():
+        if BILD_NAME.fullmatch(pfad.name) and pfad.name not in benutzt and pfad.stat().st_mtime < grenze:
+            pfad.unlink(missing_ok=True)
+
+
 def _loaded(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> dict | None:
     data = hass.data.get(DOMAIN)
     if data is None:
@@ -190,6 +273,7 @@ async def ws_save(hass: HomeAssistant, connection: websocket_api.ActiveConnectio
     data["config"] = config
     async_dispatcher_send(hass, SIGNAL_UPDATED, config)
     connection.send_result(msg["id"])
+    await hass.async_add_executor_job(_bilder_aufraeumen, Path(hass.config.path(BILD_ORDNER)), config)
 
 
 @websocket_api.require_admin
