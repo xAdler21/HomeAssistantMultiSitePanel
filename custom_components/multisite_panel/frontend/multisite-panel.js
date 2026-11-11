@@ -51,8 +51,7 @@ const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* ega
 const TABS = [
   {id: 'start', label: 'Start', icon: 'mdi:home-outline', iconOn: 'mdi:home'},
   {id: 'orte', label: 'Orte', icon: 'mdi:home-group', iconOn: 'mdi:home-group'},
-  {id: 'heizung', label: 'Heizung', icon: 'mdi:thermostat', iconOn: 'mdi:thermostat'},
-  {id: 'versorgung', label: 'Versorgung', icon: 'mdi:lightning-bolt-outline', iconOn: 'mdi:lightning-bolt'},
+  {id: 'energie', label: 'Energie', icon: 'mdi:lightning-bolt-outline', iconOn: 'mdi:lightning-bolt'},
   {id: 'sicherheit', label: 'Sicherheit', icon: 'mdi:shield-home-outline', iconOn: 'mdi:shield-home'},
 ];
 const ART = {
@@ -68,7 +67,6 @@ const ART = {
   sonstiges: {icon: 'mdi:transmission-tower', color: '--c-net', group: 'Sonstiges', short: 'Anschluss'},
 };
 const GROUP_ORDER = ['Strom', 'Wärme', 'Wasser', 'Internet', 'Sonstiges'];
-const HEAT_ARTS = new Set(['gas', 'holz', 'oel', 'waerme', 'waermepumpe']);
 const MESSUNG = {
   voll: {label: 'Gemessen', cls: 'ok', icon: 'mdi:check-circle'},
   teilweise: {label: 'Teilweise gemessen', cls: 'warn', icon: 'mdi:alert'},
@@ -140,14 +138,21 @@ function bucketize(pts, t0, t1, step){
 
 /* ---------- Konfiguration ---------- */
 const jaNein = v => v === true || lc(v) === 'ja' ? true : v === false || lc(v) === 'nein' ? false : null;
+/* Alte Tab-Namen (vor 0.4) auf die heutigen abbilden */
+const TAB_ALIAS = {heizung: 'energie', versorgung: 'energie'};
 function normConfig(raw){
   const c = raw && typeof raw === 'object' ? raw : {};
   const asObj = (v, key) => typeof v === 'string' ? {[key]: v} : (v || {});
+  // Entwürfe (entwurf: true) sind vorbereitet, aber noch nicht live: in der App für alle ausgeblendet.
+  // Nur die Vorschau im Editor kann sie mit entwuerfe_zeigen einblenden.
+  const show = c.vorschau === true && c.entwuerfe_zeigen === true;
+  const draft = x => !show && !!x && typeof x === 'object' && jaNein(x.entwurf) === true;
+  const live = list => arr(list).filter(x => !draft(x));
   const sites = arr(c.standorte).map((s, i) => {
     const id = String(s.id ?? `standort_${i + 1}`);
     const name = String(s.name ?? id);
     return {
-      id, name, short: String(s.kurz ?? name), tag: String(s.kuerzel ?? s.kurz ?? name), role: String(s.rolle ?? ''),
+      id, name, short: String(s.kurz ?? name), tag: String(s.kuerzel ?? s.kurz ?? name), role: String(s.rolle ?? ''), draft: draft(s),
       icon: s.icon || 'mdi:home',
       floors: arr(s.etagen).map(f => typeof f === 'object' ? {ref: String(f.id ?? f.name), name: f.name} : {ref: String(f)}),
       areas: arr(s.bereiche).map(String),
@@ -161,30 +166,31 @@ function normConfig(raw){
     favLabel: lc(c.favoriten_label ?? 'favorit'),
     favs: arr(c.favoriten),
     hidden: new Set(arr(c.ausblenden)),
-    scenes: arr(c.szenen).filter(s => s && s.entity).map(s => ({name: s.name || '', desc: s.beschreibung || '', entity: s.entity, site: s.standort ? String(s.standort) : null, icon: s.icon || 'mdi:play-circle-outline'})),
+    scenes: live(c.szenen).filter(s => s && s.entity).map(s => ({name: s.name || '', desc: s.beschreibung || '', entity: s.entity, site: s.standort ? String(s.standort) : null, icon: s.icon || 'mdi:play-circle-outline'})),
     supplies: arr(c.versorgung).map((s, i) => ({
       ...s, id: String(s.id ?? `versorgung_${i + 1}`), art: ART[s.art] ? s.art : 'sonstiges', name: s.name || `Anschluss ${i + 1}`,
-      sites: arr(s.standorte).map(String), versorgt: arr(s.versorgt), werte: arr(s.werte), geplant: arr(s.geplant),
-    })),
-    appliances: arr(c.geraete).filter(g => g && (g.status || g.leistung)).map((g, i) => ({
+      sites: arr(s.standorte).map(String), versorgt: live(s.versorgt), werte: live(s.werte), geplant: arr(s.geplant), _draft: draft(s),
+    })).filter(s => !s._draft),
+    appliances: live(c.geraete).filter(g => g && (g.status || g.leistung)).map((g, i) => ({
       id: `geraet_${i + 1}`, name: g.name || 'Gerät', art: APPL_ICON[g.art] ? g.art : 'waschmaschine',
       area: g.bereich || null, site: g.standort ? String(g.standort) : null,
       status: g.status || null, power: g.leistung || null, threshold: num(g.schwelle) ?? 5,
       remain: g.restzeit || null, program: g.programm || null, progress: g.fortschritt || null, notify: g.mitteilung || null,
       run: arr(g.laeuft).map(lc), done: arr(g.fertig).map(lc),
     })),
-    access: arr(c.zugang).map(a => asObj(a, 'entity')).filter(a => a.entity).map(a => ({entity: a.entity, name: a.name || null, site: a.standort ? String(a.standort) : null, art: a.art || null, status: a.status || null})),
-    cameras: arr(c.kameras).map(a => asObj(a, 'entity')).filter(a => a.entity).map(a => ({entity: a.entity, name: a.name || null, site: a.standort ? String(a.standort) : null})),
+    access: arr(c.zugang).map(a => asObj(a, 'entity')).filter(a => a.entity && !draft(a)).map(a => ({entity: a.entity, name: a.name || null, site: a.standort ? String(a.standort) : null, art: a.art || null, status: a.status || null})),
+    cameras: arr(c.kameras).map(a => asObj(a, 'entity')).filter(a => a.entity && !draft(a)).map(a => ({entity: a.entity, name: a.name || null, site: a.standort ? String(a.standort) : null})),
     events: arr(c.ereignisse),
-    season: c.heizsaison ? asObj(c.heizsaison, 'entity') : null,
-    users: arr(c.benutzer).map(u => ({name: u.name ?? null, id: u.id ?? null, sites: arr(u.standorte).map(String), menu: jaNein(u.menue_knopf)})),
+    users: live(c.benutzer).map(u => ({name: u.name ?? null, id: u.id ?? null, sites: arr(u.standorte).map(String), menu: jaNein(u.menue_knopf)})),
     // Menü-Symbol für die HA-Seitenleiste: alle (Standard), nur Admins oder niemand; je Benutzer überschreibbar
     menuButton: jaNein(c.menue_knopf) === false || lc(c.menue_knopf) === 'niemand' ? 'niemand' : lc(c.menue_knopf) === 'admins' ? 'admins' : 'alle',
-    plans: arr(c.plaene).filter(p => p && p.bild).map((p, i) => ({
+    plans: live(c.plaene).filter(p => p && p.bild).map((p, i) => ({
       id: String(p.id ?? `plan_${i + 1}`), name: p.name || 'Lageplan', site: p.standort ? String(p.standort) : null,
       file: String(p.bild), w: num(p.breite), h: num(p.hoehe),
-      points: arr(p.punkte).filter(x => x && x.entity && num(x.x) != null && num(x.y) != null).map(x => ({entity: x.entity, x: num(x.x), y: num(x.y), name: x.name || null, icon: x.icon || null})),
+      points: live(p.punkte).filter(x => x && x.entity && num(x.x) != null && num(x.y) != null).map(x => ({entity: x.entity, x: num(x.x), y: num(x.y), name: x.name || null, icon: x.icon || null})),
     })),
+    // Ganze Bereiche unten (Tabs) als Entwurf ausblenden; Start bleibt immer
+    hiddenTabs: show ? new Set() : new Set(arr(c.tabs_entwurf).map(t => TAB_ALIAS[lc(t)] || lc(t)).filter(t => t !== 'start')),
   };
 }
 const BILD_URL = '/api/multisite_panel/bild';
@@ -240,7 +246,7 @@ h1,h2,h3,p{margin:0}
 .app.root.scrolled .topscrim{opacity:1}
 
 .tabbar{position:absolute;left:0;right:0;bottom:0;z-index:20;height:calc(var(--tabbar-h) + var(--bottom-inset));padding:6px 4px var(--bottom-inset);background:var(--bar);-webkit-backdrop-filter:saturate(1.8) blur(20px);backdrop-filter:saturate(1.8) blur(20px);border-top:.5px solid var(--sep)}
-.tabbar-in{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));max-width:560px;height:100%;margin:0 auto}
+.tabbar-in{display:grid;grid-template-columns:repeat(var(--tabs,4),minmax(0,1fr));max-width:560px;height:100%;margin:0 auto}
 .tab{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;color:var(--fg-3);font-size:10.5px;font-weight:600;letter-spacing:.01em;border-radius:12px}
 .tab .i{--mdc-icon-size:26px}
 .tab.active{color:var(--accent)}
@@ -448,10 +454,6 @@ h2{font-size:20px;font-weight:700;letter-spacing:-.01em}
 .bar-v{text-align:right;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
 .bar-v.dim{color:var(--fg-3);font-weight:500}
 
-.season{padding:14px;display:flex;flex-direction:column;gap:12px}
-.season-txt{display:flex;flex-direction:column;gap:2px}
-.season-txt strong{font-size:16px}
-.season-txt span{font-size:13px;color:var(--fg-2)}
 .seg{display:grid;grid-auto-columns:minmax(0,1fr);grid-auto-flow:column;gap:2px;padding:2px;border-radius:11px;background:var(--fill)}
 .seg button{display:flex;align-items:center;justify-content:center;gap:6px;padding:9px 6px;border-radius:9px;font-size:14px;font-weight:600;color:var(--fg-2);transition:background .2s;min-width:0}
 .seg button .i{--mdc-icon-size:18px}
@@ -684,7 +686,7 @@ class MultisitePanel extends HTMLElement {
     this._root.innerHTML = `<style>${CSS}</style><div class="app root" id="app"><div class="screen" id="screen"></div><div class="topscrim" aria-hidden="true"></div><nav class="tabbar" id="tabbar" aria-label="Bereiche"></nav><div class="toast" id="toast" role="status" aria-live="polite" hidden></div><div class="sheet-layer" id="layer" hidden><div class="backdrop" data-act="sheet-close"></div><section class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle"></section></div></div>`;
     const $ = id => this._root.getElementById(id);
     this.$app = $('app'); this.$screen = $('screen'); this.$tabbar = $('tabbar'); this.$toast = $('toast'); this.$layer = $('layer'); this.$sheet = $('sheet');
-    this._st = {tab: 'start', site: 'alle', stacks: {start: [], orte: [], heizung: [], versorgung: [], sicherheit: []}, rootScroll: {}, anim: null, sheet: null};
+    this._st = {tab: 'start', site: 'alle', stacks: {start: [], orte: [], energie: [], sicherheit: []}, rootScroll: {}, anim: null, sheet: null};
     this._opt = new Map(); this._prev = {}; this._hist = {}; this._log = null; this._camUrl = {};
     this._planViews = {}; this._signed = {};
     this._lastRender = 0; this._lastScroll = 0;
@@ -749,6 +751,7 @@ class MultisitePanel extends HTMLElement {
 
   /* Für die Vorschau im Editor: zeigt einen Bereich und optional eine Unterseite */
   zeige(tab, page = null, id = null){
+    tab = TAB_ALIAS[tab] || tab;
     if (!TABS.some(t => t.id === tab)) return;
     this._closeSheet();
     this._st.tab = tab;
@@ -791,7 +794,7 @@ class MultisitePanel extends HTMLElement {
     const st = this._st;
     if (this._sites.length === 1) st.site = this._sites[0].id;
     else if (st.site !== 'alle' && !this._sites.some(s => s.id === st.site)) st.site = 'alle';
-    if (!this._cfg.sites.length){
+    if (!this._cfg.sites.some(s => !s.draft)){
       this.$tabbar.hidden = true;
       const ed = this._store && this._editorUrl() && h.user && h.user.is_admin;
       const text = !this._store
@@ -803,6 +806,7 @@ class MultisitePanel extends HTMLElement {
       return;
     }
     this.$tabbar.hidden = false;
+    if (!this._tabs().some(t => t.id === st.tab)) st.tab = 'start';
     const stack = st.stacks[st.tab], top = stack[stack.length - 1];
     let out;
     try { out = top ? this._page(top) : this._rootPage(st.tab); }
@@ -819,10 +823,12 @@ class MultisitePanel extends HTMLElement {
     if (out.after) out.after();
     this.dispatchEvent(new CustomEvent('msp-gerendert'));   // für den Editor (Hinweise neben der Vorschau)
   }
+  _tabs(){ return TABS.filter(t => !this._cfg.hiddenTabs.has(t.id)); }
   _renderTabbar(){
-    this.$tabbar.innerHTML = `<div class="tabbar-in">${TABS.map(t => { const a = this._st.tab === t.id; return `<button class="tab ${a ? 'active' : ''}" data-act="tab" data-tab="${t.id}" aria-current="${a ? 'page' : 'false'}">${ic(a ? t.iconOn : t.icon)}<span>${t.label}</span></button>`; }).join('')}</div>`;
+    const tabs = this._tabs();
+    this.$tabbar.innerHTML = `<div class="tabbar-in" style="--tabs:${tabs.length}">${tabs.map(t => { const a = this._st.tab === t.id; return `<button class="tab ${a ? 'active' : ''}" data-act="tab" data-tab="${t.id}" aria-current="${a ? 'page' : 'false'}">${ic(a ? t.iconOn : t.icon)}<span>${t.label}</span></button>`; }).join('')}</div>`;
   }
-  _rootPage(tab){ return {start: () => this._pStart(), orte: () => this._pOrte(), heizung: () => this._pHeizung(), versorgung: () => this._pVersorgung(), sicherheit: () => this._pSicherheit()}[tab](); }
+  _rootPage(tab){ return {start: () => this._pStart(), orte: () => this._pOrte(), energie: () => this._pEnergie(), sicherheit: () => this._pSicherheit()}[tab](); }
   _page(e){
     switch (e.page){
       case 'site': return this._pSite(e.id);
@@ -872,7 +878,7 @@ class MultisitePanel extends HTMLElement {
     // Entitäten aus der Konfiguration
     const refs = [];
     const add = (eid, where) => { if (!eid) return; refs.push([eid, where]); relevant.add(eid); };
-    add(cfg.weather, 'wetter'); add(cfg.outside, 'aussentemperatur'); add(cfg.season && cfg.season.entity, 'heizsaison');
+    add(cfg.weather, 'wetter'); add(cfg.outside, 'aussentemperatur');
     cfg.scenes.forEach(s => add(s.entity, `Szene ${s.name}`));
     cfg.supplies.forEach(s => {
       SUPPLY_KEYS.forEach(k => add(s[k], `${s.name} → ${k}`));
@@ -939,10 +945,10 @@ class MultisitePanel extends HTMLElement {
     const u = this._hass.user || {};
     return this._cfg.users.find(r => (r.id && r.id === u.id) || (r.name && lc(r.name) === lc(u.name))) || null;
   }
-  /* Eine Regel ohne Standorte schränkt nicht ein (z. B. nur für das Menü-Symbol) */
+  /* Eine Regel ohne Standorte schränkt nicht ein (z. B. nur für das Menü-Symbol). Standorte im Entwurf sieht niemand. */
   _allowedSites(){
-    const rule = this._userRule();
-    return rule && rule.sites.length ? this._cfg.sites.filter(s => rule.sites.includes(s.id)) : this._cfg.sites;
+    const rule = this._userRule(), live = this._cfg.sites.filter(s => !s.draft);
+    return rule && rule.sites.length ? live.filter(s => rule.sites.includes(s.id)) : live;
   }
   _menuVisible(){
     const rule = this._userRule();
@@ -1026,13 +1032,6 @@ class MultisitePanel extends HTMLElement {
     if (t == null && !cond) return null;
     return {t, label: cond ? cond[0] : '', icon: cond ? cond[1] : 'mdi:thermometer'};
   }
-  _season(){
-    const s = this._cfg.season; const st = s && s.entity && this._hass.states[s.entity];
-    if (st){ const v = lc(st.state); if (v.includes('winter')) return 'winter'; if (v.includes('sommer') || v.includes('summer')) return 'sommer'; }
-    const m = new Date().getMonth();
-    return (m >= 9 || m <= 3) ? 'winter' : 'sommer';
-  }
-  _seasonActive(s){ return !s.saison || lc(s.saison) === this._season(); }
 
   /* Geräte (Waschmaschine & Co.) */
   _appl(a){
@@ -1147,12 +1146,11 @@ class MultisitePanel extends HTMLElement {
     const vh = energyKWh(s.verbrauch_heute && h.states[s.verbrauch_heute]);
     if (vh != null) return `${fmtEnergy(vh)} heute`;
     if (s.status && h.states[s.status]) return this._statusText(h.states[s.status]);
-    if (s.saison) return this._seasonActive(s) ? 'Aktiv' : 'Pause';
     return '—';
   }
   _supplySub(s){
     if (s.beschreibung) return s.beschreibung;
-    const tags = s.sites.map(id => this._site(id)).filter(Boolean).map(x => x.tag);
+    const tags = s.sites.map(id => this._site(id)).filter(x => x && !x.draft).map(x => x.tag);
     const parts = [];
     if (s.ort) parts.push(s.ort);
     if (tags.length) parts.push(tags.length > 3 ? `versorgt ${tags.length} Standorte` : `versorgt ${tags.join(', ')}`);
@@ -1293,10 +1291,10 @@ class MultisitePanel extends HTMLElement {
     const out = this._outside();
     if (out) chips.push(chip(out.icon, '--c-water', 'Außen', [out.t != null ? `${f0(out.t)}°` : '', out.label].filter(Boolean).join(' · ')));
     chips.push(chip('mdi:lightbulb', '--c-light', 'Licht', lightsOn.length ? `${lightsOn.length} an` : 'Alle aus', 'data-act="lights-sheet"'));
-    if (access.length) chips.push(chip(open.length ? 'mdi:alert' : 'mdi:lock', open.length ? '--warn' : '--ok', 'Türen & Tore', open.length ? `${open.length} offen` : 'Alles zu', 'data-act="tab" data-tab="sicherheit"'));
+    if (access.length) chips.push(chip(open.length ? 'mdi:alert' : 'mdi:lock', open.length ? '--warn' : '--ok', 'Türen & Tore', open.length ? `${open.length} offen` : 'Alles zu', this._cfg.hiddenTabs.has('sicherheit') ? '' : 'data-act="tab" data-tab="sicherheit"'));
     const solarSup = this._supplies().find(s => this._now(s).solar != null);
     if (solarSup) chips.push(chip('mdi:solar-power', '--c-sun', 'Solar', fmtPower(this._now(solarSup).solar), `data-act="push" data-page="supply" data-id="${esc(solarSup.id)}"`));
-    if (clims.length) chips.push(chip('mdi:thermostat', '--c-heat', 'Heizung', heating.length ? `${heating.length} ${heating.length === 1 ? 'Raum heizt' : 'Räume heizen'}` : 'Alles warm', 'data-act="tab" data-tab="heizung"'));
+    if (clims.length) chips.push(chip('mdi:thermostat', '--c-heat', 'Heizung', heating.length ? `${heating.length} ${heating.length === 1 ? 'Raum heizt' : 'Räume heizen'}` : 'Alles warm', this._cfg.hiddenTabs.has('energie') ? '' : 'data-act="tab" data-tab="energie"'));
 
     const alerts = [];
     const alert = (tone, icon, title, sub, btn) => `<div class="alert ${tone}"><span class="alert-ic">${ic(icon)}</span><div class="alert-txt"><strong>${esc(title)}</strong><span>${esc(sub)}</span></div>${btn || ''}</div>`;
@@ -1417,36 +1415,24 @@ class MultisitePanel extends HTMLElement {
     return {nav: this._navBar(name), body: parts.join('')};
   }
 
-  _pHeizung(){
-    const sources = this._supplies().filter(s => HEAT_ARTS.has(s.art));
+  /* Energie: alle Anschlüsse (Strom, Wärme, Wasser, Internet) und die Thermostate auf einer Seite */
+  _pEnergie(){
+    const list = this._supplies();
     const clims = this._ents('climate');
     const heating = clims.filter(e => { const c = this._climate(e); return c && c.heating; }).length;
-    const seasonal = sources.filter(s => s.saison);
-    let season = '';
-    if (seasonal.length){
-      const cur = this._season();
-      const ent = this._cfg.season && this._cfg.season.entity && this._hass.states[this._cfg.season.entity];
-      const label = v => { const l = seasonal.filter(s => lc(s.saison) === v).map(s => ART[s.art].short); return `${v === 'winter' ? 'Winter' : 'Sommer'}${l.length ? ' · ' + l.join(', ') : ''}`; };
-      const btn = v => `<button role="radio" aria-checked="${cur === v}" class="${cur === v ? 'sel' : ''}" ${ent ? `data-act="season" data-v="${v}"` : 'disabled'}>${ic(v === 'winter' ? 'mdi:snowflake' : 'mdi:white-balance-sunny')}${esc(label(v))}</button>`;
-      const cs = this._cfg.season || {};
-      season = `<div class="card season"><div class="season-txt"><strong>${esc(cs.titel || 'Heizbetrieb')}</strong><span>${esc(cs.text || (ent ? 'Welche Heizung gerade läuft' : 'Wechselt automatisch: Oktober bis April ist Winter'))}</span></div><div class="seg" role="radiogroup" aria-label="Heizbetrieb">${btn('winter')}${btn('sommer')}</div></div>`;
-    }
+    const rows = items => `<div class="list">${items.map(s => this._supplyRow(s)).join('')}</div>`;
+    const secs = GROUP_ORDER.map(g => {
+      const items = list.filter(s => ART[s.art].group === g);
+      if (g !== 'Wärme') return items.length ? this._sec(g, rows(items)) : '';
+      // Wärme: Wärmequellen und darunter die Thermostate der Räume
+      const tiles = clims.length ? `<div class="tiles">${clims.map(e => this._climTile(e, this._st.site === 'alle')).join('')}</div>` : '';
+      return [items.length ? this._sec('Heizung', rows(items)) : '', tiles ? this._sec(items.length ? 'Räume' : 'Heizung', tiles) : ''].join('');
+    }).join('');
+    const eyebrow = [list.length ? `${list.length} ${list.length === 1 ? 'Anschluss' : 'Anschlüsse'}` : '', clims.length ? (heating ? `${heating} ${heating === 1 ? 'Raum heizt' : 'Räume heizen'}` : 'alle Räume warm') : ''].filter(Boolean).join(' · ') || 'Strom, Wärme, Wasser';
     return {body: [
-      this._rootHeader('Heizung', clims.length ? (heating ? `${heating} ${heating === 1 ? 'Raum heizt' : 'Räume heizen'} gerade` : 'Alle Räume sind warm') : 'Wärme & Thermostate'),
-      sources.length ? this._sec('Wärmequellen', `<div class="list">${sources.map(s => this._supplyRow(s)).join('')}</div>`) : '',
-      season,
-      this._sec('Räume', clims.length ? `<div class="tiles">${clims.map(e => this._climTile(e, this._st.site === 'alle')).join('')}</div>` : '<div class="card empty">Hier gibt es noch keine Thermostate. Thermostate erscheinen, sobald sie in Home Assistant einem Raum zugeordnet sind.</div>'),
-    ].join('')};
-  }
-
-  _pVersorgung(){
-    const list = this._supplies();
-    const groups = GROUP_ORDER.map(g => { const items = list.filter(s => ART[s.art].group === g); return items.length ? this._sec(g, `<div class="list">${items.map(s => this._supplyRow(s)).join('')}</div>`) : ''; }).join('');
-    const measured = list.filter(s => ['voll', 'therme', 'teilweise'].includes(s.messung || (SUPPLY_KEYS.some(k => s[k]) ? 'voll' : 'keine'))).length;
-    return {body: [
-      this._rootHeader('Versorgung', list.length ? `${list.length} Anschlüsse · ${measured} gemessen` : 'Anschlüsse'),
+      this._rootHeader('Energie', eyebrow),
       this._energyCard(),
-      groups || '<div class="card empty">Noch keine Anschlüsse eingetragen. Lege sie in der Konfiguration unter <code>versorgung</code> an.</div>',
+      secs || '<div class="card empty">Noch keine Anschlüsse eingetragen. Lege sie im Editor unter Energie an. Thermostate erscheinen hier automatisch, sobald sie in Home Assistant einem Raum zugeordnet sind.</div>',
     ].join('')};
   }
 
@@ -1454,8 +1440,7 @@ class MultisitePanel extends HTMLElement {
     const s = this._supply(id);
     if (!s) return {nav: this._navBar('Anschluss'), body: '<div class="card empty">Diesen Anschluss gibt es nicht mehr.</div>'};
     const h = this._hass, a = ART[s.art], m = this._messung(s), n = this._now(s);
-    const seasonPill = s.saison ? (this._seasonActive(s) ? `<span class="pill accent">${ic('mdi:check')}${lc(s.saison) === 'winter' ? 'Winterbetrieb' : 'Sommerbetrieb'} · aktiv</span>` : `<span class="pill muted">${lc(s.saison) === 'winter' ? 'Winterbetrieb' : 'Sommerbetrieb'} · Pause</span>`) : '';
-    const parts = [`<header class="lt pushed"><div class="sup-head"><span class="row-ic lg" style="--c:var(${a.color})">${ic(s.icon || a.icon)}</span><div><span class="eyebrow">${esc([a.group, s.ort].filter(Boolean).join(' · '))}</span><h1>${esc(s.name)}</h1></div></div></header><div class="pills">${this._pill(m)}${seasonPill}</div>`];
+    const parts = [`<header class="lt pushed"><div class="sup-head"><span class="row-ic lg" style="--c:var(${a.color})">${ic(s.icon || a.icon)}</span><div><span class="eyebrow">${esc([a.group, s.ort].filter(Boolean).join(' · '))}</span><h1>${esc(s.name)}</h1></div></div></header><div class="pills">${this._pill(m)}</div>`];
     if (s.hinweis) parts.push(this._note(s.hinweis));
     // Jetzt
     const k = [];
@@ -1574,7 +1559,7 @@ class MultisitePanel extends HTMLElement {
   _plan(id){ return this._cfg.plans.find(p => p.id === id); }
   /* siteId = null: alle sichtbaren (Orte-Übersicht); Pläne ohne Standort nur für Benutzer, die alles sehen */
   _plansFor(siteId){
-    const all = this._sites.length === this._cfg.sites.length;
+    const all = this._sites.length === this._cfg.sites.filter(s => !s.draft).length;
     return this._cfg.plans.filter(p => siteId ? p.site === siteId : p.site ? this._sites.some(s => s.id === p.site) : all);
   }
   /* Punkte ohne Entität oder an einem Standort, den der Benutzer nicht sieht, fallen weg */
@@ -2020,13 +2005,6 @@ class MultisitePanel extends HTMLElement {
           if (!a || !a.action) break;
           this._call(a.action.svc[0], a.action.svc[1], {entity_id: id});
           this._toast(`${a.name}: ${a.action.label === 'Schließen' ? 'wird geschlossen' : a.action.label === 'Abschließen' ? 'wird abgeschlossen' : 'wird geöffnet'}`);
-          break;
-        }
-        case 'season': {
-          const ent = this._cfg.season && this._cfg.season.entity, st = ent && h.states[ent];
-          if (!st) break;
-          const opt = (st.attributes.options || []).find(o => lc(o).includes(el.dataset.v) || (el.dataset.v === 'sommer' && lc(o).includes('summer')));
-          if (opt) this._call(domainOf(ent), 'select_option', {entity_id: ent, option: opt}); else this._toast('In der Auswahl fehlt die Option „Winter“ oder „Sommer“');
           break;
         }
         case 'lights-off-site': this._lightsOff(this._lightsOn(id)); break;

@@ -97,7 +97,6 @@ energy('sensor.therme_gas_heute', 'Gas heute', 71);
 add('binary_sensor.router_internet', 'on', {friendly_name: 'Internet', device_class: 'connectivity'});
 add('sensor.router_download', '248', {friendly_name: 'Download', unit_of_measurement: 'Mbit/s'});
 add('sensor.router_upload', '41', {friendly_name: 'Upload', unit_of_measurement: 'Mbit/s'});
-add('input_select.heizsaison', 'Winter', {friendly_name: 'Heizsaison', options: ['Winter', 'Sommer']});
 add('weather.forecast_home', 'partlycloudy', {friendly_name: 'Zuhause', temperature: 11});
 add('script.feierabend_firma', 'off', {friendly_name: 'Feierabend Firma'});
 add('scene.gute_nacht', '2026-10-12T21:00:00+00:00', {friendly_name: 'Gute Nacht'});
@@ -124,7 +123,6 @@ export const mockConfig = {
     {id: 'feld', name: 'Am Feld 1', kurz: 'Am Feld 1', kuerzel: 'Feld', rolle: 'Wohnhaus & Halle', icon: 'mdi:warehouse', etagen: [{id: 'Feld Wohnhaus', name: 'Wohnhaus'}, {id: 'Feld Halle', name: 'Halle'}]},
     {id: 'garten', name: 'Gartenhaus', kurz: 'Gartenhaus', kuerzel: 'Garten', rolle: 'Gewächshaus', icon: 'mdi:flower', etagen: ['Gartenhaus']},
   ],
-  heizsaison: {entity: 'input_select.heizsaison', titel: 'Heizbetrieb', text: 'Holz im Winter, Öl im Sommer'},
   plaene: [
     {id: 'areal', name: 'Areal', bild: 'plan-demo.svg', breite: 1600, hoehe: 1000, punkte: [
       {entity: 'light.werkstatt_hallenlicht', x: 24.4, y: 31},
@@ -146,8 +144,8 @@ export const mockConfig = {
     {id: 'gas1', art: 'gas', name: 'Gas 1', ort: 'Lindenstraße 4a', standorte: ['haus'], messung: 'therme', verbrauch_heute: 'sensor.therme_gas_heute', werte_titel: 'Therme',
       werte: [{name: 'Außentemperatur', entity: 'sensor.therme_aussentemperatur', icon: 'mdi:thermometer'}, {name: 'Vorlauf', entity: 'sensor.therme_vorlauf', icon: 'mdi:thermometer'}, {name: 'Warmwasser', entity: 'sensor.therme_warmwasser', icon: 'mdi:water-thermometer'}]},
     {id: 'gas2', art: 'gas', name: 'Gas 2', ort: 'Am Feld 1', standorte: ['feld'], messung: 'keine', beschreibung: 'Am Feld komplett'},
-    {id: 'holz', art: 'holz', name: 'Holzheizung', standorte: ['firma', 'birke'], saison: 'winter', messung: 'offen', beschreibung: 'Büro, Wohnung · im Winter auch Birkenweg 7', versorgt: [{name: 'Büro', standort: 'firma', hinweis: 'Winter'}, {name: 'Wohnung', hinweis: 'Winter'}, {name: 'Gästehaus', standort: 'birke', hinweis: 'Winter'}]},
-    {id: 'oel', art: 'oel', name: 'Ölheizung', ort: 'Birkenweg 7', standorte: ['birke'], saison: 'sommer', messung: 'offen', versorgt: [{name: 'Gästehaus', standort: 'birke', hinweis: 'Sommer'}]},
+    {id: 'holz', art: 'holz', name: 'Holzheizung', standorte: ['firma', 'birke'], entwurf: true, messung: 'offen', beschreibung: 'Büro, Wohnung · im Winter auch Birkenweg 7', versorgt: [{name: 'Büro', standort: 'firma', hinweis: 'Winter'}, {name: 'Wohnung', hinweis: 'Winter'}, {name: 'Gästehaus', standort: 'birke', hinweis: 'Winter'}]},
+    {id: 'oel', art: 'oel', name: 'Ölheizung', ort: 'Birkenweg 7', standorte: ['birke'], messung: 'offen', versorgt: [{name: 'Gästehaus', standort: 'birke', hinweis: 'Sommer'}]},
     {id: 'wasser', art: 'wasser', name: 'Stadtwasser', ort: 'Birkenweg 7', standorte: ['birke'], messung: 'keine', beschreibung: 'nur Birkenweg 7'},
     {id: 'brunnen', art: 'brunnen', name: 'Brunnen', standorte: ['firma', 'haus', 'feld', 'garten'], messung: 'geplant', beschreibung: 'alle Gebäude außer Birkenweg 7', hinweis: 'Die Brunnensteuerung ist noch nicht angebunden.'},
     {id: 'internet', art: 'internet', name: 'Internet', ort: 'Lindenstraße 4', standorte: ['firma', 'haus', 'birke', 'feld', 'garten'], beschreibung: 'kommt in der Lindenstraße 4 an · versorgt alles', status: 'binary_sensor.router_internet',

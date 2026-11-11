@@ -44,12 +44,14 @@ function prep(raw){
   const c = clone(raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {});
   for (const k of ['standorte', 'versorgung', 'geraete', 'szenen', 'benutzer', 'zugang', 'kameras', 'ereignisse', 'favoriten', 'ausblenden', 'plaene']) if (c[k] != null) c[k] = arr(c[k]);
   arr(c.plaene).forEach(p => { if (p.punkte != null) p.punkte = arr(p.punkte); if (p.standort != null) p.standort = String(p.standort); });
-  if (typeof c.heizsaison === 'string') c.heizsaison = {entity: c.heizsaison};
+  // Heizbetrieb Winter/Sommer gibt es seit 0.4 nicht mehr
+  delete c.heizsaison;
+  if (c.tabs_entwurf != null) c.tabs_entwurf = arr(c.tabs_entwurf).map(t => ({heizung: 'energie', versorgung: 'energie'}[lc(t)] || lc(t))).filter((t, i, a) => a.indexOf(t) === i);
   // Menü-Symbol: alte Form true/false in die Auswahl übersetzen
   if (c.menue_knopf === false) c.menue_knopf = 'niemand'; else if (c.menue_knopf === true) delete c.menue_knopf;
   for (const k of ['zugang', 'kameras']) if (c[k]) c[k] = c[k].map(x => typeof x === 'string' ? {entity: x} : x);
   arr(c.standorte).forEach(s => { if (s.id != null) s.id = String(s.id); for (const k of ['etagen', 'bereiche']) if (s[k] != null) s[k] = arr(s[k]); });
-  arr(c.versorgung).forEach(s => { for (const k of ['versorgt', 'werte', 'geplant']) if (s[k] != null) s[k] = arr(s[k]); if (s.standorte != null) s.standorte = arr(s.standorte).map(String); });
+  arr(c.versorgung).forEach(s => { delete s.saison; for (const k of ['versorgt', 'werte', 'geplant']) if (s[k] != null) s[k] = arr(s[k]); if (s.standorte != null) s.standorte = arr(s.standorte).map(String); });
   arr(c.geraete).forEach(g => { for (const k of ['laeuft', 'fertig']) if (g[k] != null) g[k] = arr(g[k]); });
   arr(c.benutzer).forEach(u => {
     if (u.standorte != null) u.standorte = arr(u.standorte).map(String);
@@ -109,7 +111,7 @@ function relinkSite(c, from, to){
 const ART = [['strom', 'Strom', 'mdi:lightning-bolt', '--c-power'], ['gas', 'Gas', 'mdi:meter-gas', '--c-gas'], ['holz', 'Holz', 'mdi:fireplace', '--c-wood'], ['oel', 'Öl', 'mdi:barrel', '--c-oil'], ['waerme', 'Wärme', 'mdi:radiator', '--c-heat'], ['waermepumpe', 'Wärmepumpe', 'mdi:heat-pump', '--c-heat'], ['wasser', 'Wasser', 'mdi:water', '--c-water'], ['brunnen', 'Brunnen', 'mdi:water-well', '--c-well'], ['internet', 'Internet', 'mdi:web', '--c-net'], ['sonstiges', 'Sonstiges', 'mdi:transmission-tower', '--c-net']];
 const GERAETE = [['waschmaschine', 'Waschmaschine', 'mdi:washing-machine'], ['trockner', 'Trockner', 'mdi:tumble-dryer'], ['spuelmaschine', 'Spülmaschine', 'mdi:dishwasher'], ['backofen', 'Backofen', 'mdi:stove'], ['kaffeemaschine', 'Kaffeemaschine', 'mdi:coffee-maker']];
 const MESSUNG = [['', 'Automatisch'], ['voll', 'Gemessen'], ['teilweise', 'Teilweise gemessen'], ['therme', 'Über die Therme'], ['keine', 'Nicht gemessen'], ['geplant', 'In Vorbereitung'], ['offen', 'Noch nicht angebunden']];
-const SAISON = [['', 'Ganzjährig'], ['winter', 'Nur im Winter'], ['sommer', 'Nur im Sommer']];
+const TABS_WAHL = [['orte', 'Orte', 'mdi:home-group'], ['energie', 'Energie', 'mdi:lightning-bolt'], ['sicherheit', 'Sicherheit', 'mdi:shield-home']];
 const ZUGANG_ART = [['', 'Automatisch'], ['tor', 'Tor'], ['tuer', 'Tür']];
 const art = v => ART.find(a => a[0] === v) || ART[0];
 const geraet = v => GERAETE.find(a => a[0] === v) || GERAETE[0];
@@ -121,13 +123,13 @@ const E = (k, l, dom = '', o = {}) => ({t: 'entity', k, l, dom, ...o});
 const S = (k, l, opts, o = {}) => ({t: 'select', k, l, opts, ...o});
 const G = (l, fields, o = {}) => ({t: 'group', l, fields, ...o});
 const isStrom = s => (s.art || 'strom') === 'strom';
+const isDraft = o => !!o && typeof o === 'object' && (o.entwurf === true || lc(o.entwurf) === 'ja');
 
 const SECTIONS = [
   {id: 'allgemein', label: 'Allgemein', icon: 'mdi:tune-variant', tab: 'start', desc: 'Wetter, Favoriten und Darstellung der Startseite.'},
   {id: 'standorte', label: 'Standorte', icon: 'mdi:home-group', tab: 'orte', list: 'standorte', desc: 'Jeder Standort fasst Etagen und Räume aus Home Assistant zusammen.'},
   {id: 'plaene', label: 'Lagepläne', icon: 'mdi:map-outline', tab: 'orte', list: 'plaene', desc: 'Ein Luftbild oder eine Ansicht eures Areals, darauf die Lichter als Knöpfe. Das Bild bleibt in Home Assistant und ist nur angemeldet abrufbar.'},
-  {id: 'versorgung', label: 'Versorgung', icon: 'mdi:transmission-tower', tab: 'versorgung', list: 'versorgung', desc: 'Ein Eintrag pro Anschluss: Strom, Gas, Wasser, Heizung, Internet.'},
-  {id: 'heizung', label: 'Heizung', icon: 'mdi:thermostat', tab: 'heizung', desc: 'Umschalter zwischen Winter- und Sommerbetrieb.'},
+  {id: 'versorgung', label: 'Energie', icon: 'mdi:lightning-bolt', tab: 'energie', list: 'versorgung', desc: 'Ein Eintrag pro Anschluss: Strom, Gas, Holz, Öl, Wasser, Internet. Thermostate erscheinen im Tab Energie automatisch.'},
   {id: 'geraete', label: 'Geräte', icon: 'mdi:washing-machine', tab: 'start', list: 'geraete', desc: 'Wasch- und Spülmaschine & Co. erscheinen auf der Startseite, solange sie laufen oder fertig sind.'},
   {id: 'szenen', label: 'Szenen', icon: 'mdi:play-circle-outline', tab: 'start', list: 'szenen', desc: 'Knöpfe auf der Startseite für Szenen, Skripte oder Taster.'},
   {id: 'sicherheit', label: 'Sicherheit', icon: 'mdi:shield-home-outline', tab: 'sicherheit', desc: 'Zusätzliche Türen, Tore, Kameras und Ereignisse.'},
@@ -149,13 +151,9 @@ const PAGES = {
       S('menue_knopf', 'Menü-Symbol oben links sehen', [['', 'Alle'], ['admins', 'Nur Admins'], ['niemand', 'Niemand']], {help: 'Das Symbol öffnet die Seitenleiste von Home Assistant (nur auf dem Handy). Unter Benutzer lässt es sich pro Person anders einstellen.'}),
       {t: 'entities', k: 'ausblenden', l: 'Ausblenden', dom: '', wide: true, help: 'Diese Geräte erscheinen nirgends in der App'},
     ]),
-  ],
-  heizung: [
-    G('Heizbetrieb Winter/Sommer', [
-      E(['heizsaison', 'entity'], 'Umschalter', 'input_select,select', {wide: true, help: 'Auswahl mit den Optionen „Winter“ und „Sommer“. Ohne Umschalter gilt Oktober bis April als Winter.'}),
-      T(['heizsaison', 'titel'], 'Überschrift', {ph: 'Heizbetrieb'}),
-      T(['heizsaison', 'text'], 'Beschreibung', {ph: 'Welche Heizung gerade läuft'}),
-    ], {help: 'Erscheint unter Heizung, sobald ein Anschluss nur im Winter oder nur im Sommer läuft (Versorgung → Betrieb).'}),
+    G('Entwürfe', [
+      {t: 'choices', k: 'tabs_entwurf', l: 'Bereiche unten, die noch Entwurf sind', opts: TABS_WAHL, wide: true, help: 'Markierte Bereiche sind für alle ausgeblendet. Start bleibt immer.'},
+    ], {help: 'Alles lässt sich vorbereiten, ohne dass es schon jemand sieht: Jeder Standort, Anschluss, Lageplan, jedes Gerät, jede Szene und jede Zeile (z. B. ein Gebäude unter „Versorgt“ oder ein Licht im Lageplan) hat ein Auge-Symbol bzw. den Schalter „Live“. Aus = Entwurf, in der App für alle unsichtbar. In der Vorschau hier lassen sich Entwürfe mit „Entwürfe zeigen“ einblenden.'}),
   ],
   sicherheit: [
     G('Türen, Tore und Schlösser', [
@@ -227,7 +225,7 @@ const LISTS = {
         {t: 'sites', k: 'standorte', l: 'Gehört zu den Standorten', wide: true, help: 'Bestimmt, bei welchen Standorten der Anschluss erscheint'},
       ]),
       G('Status', [
-        S('messung', 'Messung', MESSUNG), S('saison', 'Betrieb', SAISON),
+        S('messung', 'Messung', MESSUNG),
         {t: 'area', k: 'hinweis', l: 'Hinweis', ph: 'z. B. was noch nicht gemessen wird'},
       ]),
       G('Werte jetzt', [
@@ -458,6 +456,21 @@ input.chip-add{width:auto;flex:1;min-width:170px;height:32px;border-radius:999px
 .pill{display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:600;padding:3px 9px 3px 7px;border-radius:999px;white-space:nowrap}
 .pill .i{--mdc-icon-size:14px}
 .pill.warn{background:var(--warn-bg);color:var(--warn)}
+.pill.draft{background:var(--fill-2);color:var(--fg-2)}
+.icard.draft .icard-ic,.mrow.draft .mrow-ic{opacity:.4}
+.icard.draft .icard-txt b{color:var(--fg-2)}
+.rowc.draft,.mrow.draft{border-style:dashed}
+.rowc.draft .grid{opacity:.6}
+.ib.eye.on{color:var(--warn);background:var(--warn-bg)}
+.live-sw{display:inline-flex;align-items:center;gap:8px;height:38px;padding:0 6px;font-weight:600;border-radius:10px}
+.live-sw:hover{background:var(--fill)}
+.live-sw.on .sw{background:var(--accent)}
+.live-sw.on .sw::after{transform:translateX(16px)}
+.draft-note{display:flex;align-items:flex-start;gap:10px;padding:12px 14px;border-radius:14px;background:var(--warn-bg);color:var(--warn);line-height:1.45}
+.draft-note b{font-weight:700}
+.pe-pt.draft .i{opacity:.55;border-style:dashed}
+.pv-chk{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;color:var(--fg-2);cursor:pointer;white-space:nowrap}
+.pv-chk input{margin:0;accent-color:var(--accent)}
 
 .pe{gap:10px}
 .pe-drop{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;min-height:200px;padding:24px;border:2px dashed var(--line);border-radius:14px;background:var(--bg);color:var(--fg-2);text-align:center;cursor:pointer}
@@ -540,6 +553,7 @@ class MultisiteEditor extends HTMLElement {
     this._sec = SECTIONS.some(s => s.id === lsGet('msp-editor-sec')) ? lsGet('msp-editor-sec') : 'allgemein';
     this._item = null; this._undo = []; this._redo = []; this._lastType = 0;
     this._users = null; this._pvUser = ''; this._pvOpen = false; this._hints = 0;
+    this._pvDrafts = lsGet('msp-editor-pv-drafts') !== '0';   // Vorschau zeigt Entwürfe, bis man es abschaltet
     this._bind();
   }
 
@@ -640,7 +654,7 @@ class MultisiteEditor extends HTMLElement {
   _restoreDraft(){
     try {
       const s = JSON.parse(lsGet(this._draftKey()) || 'null');
-      if (s && s.draft && s.base === JSON.stringify(clean(this._saved))){ this._draft = prep(s.draft); if (this._dirty()) this._toast('Ungespeicherter Entwurf wiederhergestellt'); }
+      if (s && s.draft && s.base === JSON.stringify(clean(this._saved))){ this._draft = prep(s.draft); if (this._dirty()) this._toast('Ungespeicherte Änderungen wiederhergestellt'); }
     } catch (e){ /* egal */ }
   }
   async _save(){
@@ -693,7 +707,7 @@ class MultisiteEditor extends HTMLElement {
   _applyPreview(){
     const p = this._preview;
     if (!p || !this._draft) return;
-    p.panel = {url_path: 'vorschau', config: {...clean(this._draft), vorschau: true}};
+    p.panel = {url_path: 'vorschau', config: {...clean(this._draft), vorschau: true, entwuerfe_zeigen: this._pvDrafts}};
     if (!p.hass) p.hass = this._pvHass();
     // zeige() fehlt, wenn noch die alte Panel-Datei (vor 0.2.0) im Browser geladen ist
     if (this._pvNav && typeof p.zeige === 'function'){ const n = this._pvNav; this._pvNav = null; p.zeige(n.tab, n.page, n.id); }
@@ -749,7 +763,7 @@ class MultisiteEditor extends HTMLElement {
   }
   _renderPvTop(){
     const users = arr(this._users), n = this._hints;
-    this.$pvTop.innerHTML = `<div class="pv-row"><strong>Vorschau</strong>${users.length ? `<select data-change="pv-user" aria-label="Vorschau als Benutzer"><option value="">als ich</option>${users.map(u => `<option value="${esc(u.id)}" ${this._pvUser === u.id ? 'selected' : ''}>als ${esc(u.name)}</option>`).join('')}</select>` : ''}<button class="ib pv-close" data-act="pv-toggle" title="Vorschau schließen" aria-label="Vorschau schließen">${ic('mdi:close')}</button></div>
+    this.$pvTop.innerHTML = `<div class="pv-row"><strong>Vorschau</strong><label class="pv-chk" title="Entwürfe sind in der App für alle ausgeblendet"><input type="checkbox" data-change="pv-drafts" ${this._pvDrafts ? 'checked' : ''}>Entwürfe zeigen</label>${users.length ? `<select data-change="pv-user" aria-label="Vorschau als Benutzer"><option value="">als ich</option>${users.map(u => `<option value="${esc(u.id)}" ${this._pvUser === u.id ? 'selected' : ''}>als ${esc(u.name)}</option>`).join('')}</select>` : ''}<button class="ib pv-close" data-act="pv-toggle" title="Vorschau schließen" aria-label="Vorschau schließen">${ic('mdi:close')}</button></div>
       <button class="hints ${n ? 'warn' : 'ok'}" data-act="hints">${ic(n ? 'mdi:alert' : 'mdi:check-circle')}${n ? `${n} ${n === 1 ? 'Hinweis' : 'Hinweise'} zur Einrichtung` : 'Einrichtung in Ordnung'}</button>`;
   }
   _renderMain(){
@@ -775,8 +789,8 @@ class MultisiteEditor extends HTMLElement {
   _listView(s){
     const L = LISTS[s.list], items = arr(this._draft[s.list]);
     const cards = items.map((it, i) => {
-      const bad = this._missing(it);
-      return `<div class="icard" draggable="true" data-drag="${i}"><span class="grip" title="Ziehen zum Sortieren">${ic('mdi:drag-vertical')}</span><button class="icard-main" data-act="open" data-i="${i}"><span class="icard-ic" style="--c:var(${L.color ? L.color(it) : '--accent'})">${ic(L.icon(it))}</span><span class="icard-txt"><b>${esc(L.title(it))}</b><small>${esc(L.sub(it))}</small></span>${bad ? `<span class="pill warn" title="Entitäten, die es in Home Assistant nicht gibt">${ic('mdi:alert')}${bad}</span>` : ''}${ic('mdi:chevron-right', 'chev')}</button>${this._mv([s.list], i, items.length)}</div>`;
+      const bad = this._missing(it), d = isDraft(it);
+      return `<div class="icard ${d ? 'draft' : ''}" draggable="true" data-drag="${i}"><span class="grip" title="Ziehen zum Sortieren">${ic('mdi:drag-vertical')}</span><button class="icard-main" data-act="open" data-i="${i}"><span class="icard-ic" style="--c:var(${L.color ? L.color(it) : '--accent'})">${ic(L.icon(it))}</span><span class="icard-txt"><b>${esc(L.title(it))}</b><small>${esc(L.sub(it))}</small></span>${d ? `<span class="pill draft">${ic('mdi:eye-off-outline')}Entwurf</span>` : ''}${bad ? `<span class="pill warn" title="Entitäten, die es in Home Assistant nicht gibt">${ic('mdi:alert')}${bad}</span>` : ''}${ic('mdi:chevron-right', 'chev')}</button>${this._mv([s.list], i, items.length, it)}</div>`;
     }).join('');
     return this._head(s, `<button class="btn" data-act="new">${ic('mdi:plus')}${esc(L.add)}</button>`)
       + (items.length ? `<div class="icards">${cards}</div>` : `<div class="empty">Noch nichts angelegt. Mit „${esc(L.add)}“ geht es los.</div>`);
@@ -784,15 +798,17 @@ class MultisiteEditor extends HTMLElement {
   _itemView(s){
     const L = LISTS[s.list], it = arr(this._draft[s.list])[this._item];
     if (!it){ this._item = null; return this._listView(s); }
+    const d = isDraft(it);
     return `<button class="crumb" data-act="back">${ic('mdi:chevron-left')}${esc(s.label)}</button>
       <div class="head"><div class="head-t"><span class="icard-ic lg" style="--c:var(${L.color ? L.color(it) : '--accent'})">${ic(L.icon(it))}</span><h1 id="itemTitle">${esc(L.title(it))}</h1></div>
-      <div class="head-act"><button class="btn ghost" data-act="dup">${ic('mdi:content-copy')}Duplizieren</button><button class="btn ghost danger" data-act="del">${ic('mdi:delete-outline')}Löschen</button></div></div>
+      <div class="head-act"><button class="live-sw ${d ? '' : 'on'}" role="switch" aria-checked="${!d}" data-act="entwurf" data-path="${pj([s.list, this._item])}"><span class="sw"></span>Live in der App</button><button class="btn ghost" data-act="dup">${ic('mdi:content-copy')}Duplizieren</button><button class="btn ghost danger" data-act="del">${ic('mdi:delete-outline')}Löschen</button></div></div>
+      ${d ? `<div class="draft-note">${ic('mdi:eye-off-outline')}<span><b>Entwurf.</b> In der App für alle ausgeblendet. Du kannst alles fertig einrichten und später mit „Live in der App“ freischalten.</span></div>` : ''}
       ${this._fields(L.fields, [s.list, this._item])}`;
   }
   _codeView(s){
     return this._head(s) + `<textarea class="code" id="yaml" spellcheck="false" aria-label="Konfiguration als YAML">${esc(this._yaml ?? 'Wird geladen …')}</textarea>
-      <div class="code-act"><button class="btn" data-act="yaml-apply">${ic('mdi:check')}Übernehmen</button><button class="btn ghost" data-act="yaml-reload">${ic('mdi:refresh')}Neu aus dem Entwurf</button><span class="code-msg ${this._yamlBad ? 'bad' : ''}" id="yamlMsg">${esc(this._yamlMsg || '')}</span></div>
-      <p class="help">„Übernehmen“ ersetzt den Entwurf, gespeichert wird erst mit „Speichern“. Zum Sichern den Text kopieren; eine alte multisite-panel.yaml kannst du hier einfügen.</p>`;
+      <div class="code-act"><button class="btn" data-act="yaml-apply">${ic('mdi:check')}Übernehmen</button><button class="btn ghost" data-act="yaml-reload">${ic('mdi:refresh')}Neu laden</button><span class="code-msg ${this._yamlBad ? 'bad' : ''}" id="yamlMsg">${esc(this._yamlMsg || '')}</span></div>
+      <p class="help">„Übernehmen“ ersetzt den Bearbeitungsstand, gespeichert wird erst mit „Speichern“. Zum Sichern den Text kopieren; eine alte multisite-panel.yaml kannst du hier einfügen.</p>`;
   }
   async _loadYaml(){
     this._codeLoaded = true;
@@ -841,6 +857,7 @@ class MultisiteEditor extends HTMLElement {
         return wrap(`<select data-path="${P}" data-type="select" aria-label="${L}"><option value="">— keiner —</option>${sites.map(s => `<option value="${esc(s.id)}" ${String(s.id) === String(v ?? '') ? 'selected' : ''}>${esc(s.kurz || s.name || s.id)}</option>`).join('')}${known ? '' : `<option value="${esc(v)}" selected>${esc(v)} (gibt es nicht)</option>`}</select>`);
       }
       case 'sites': return wrap(this._sitesChips(path, arr(v)), true);
+      case 'choices': return wrap(this._choices(path, arr(v), f.opts), true);
       case 'floors': return wrap(this._floorsEditor(path, arr(v)), true);
       case 'areas': return wrap(this._areasEditor(path, arr(v)), true);
       case 'area1': return wrap(this._areaSelect(path, v, L));
@@ -865,11 +882,20 @@ class MultisiteEditor extends HTMLElement {
     walk(o);
     return n;
   }
-  _mv(path, i, n){
+  /* obj angegeben: zusätzlich das Auge für Entwurf/Live */
+  _mv(path, i, n, obj){
     const P = pj(path);
-    return `<span class="mv"><button class="ib sm" data-act="mv" data-path="${P}" data-i="${i}" data-d="-1" title="Nach oben" aria-label="Nach oben" ${i ? '' : 'disabled'}>${ic('mdi:chevron-up')}</button><button class="ib sm" data-act="mv" data-path="${P}" data-i="${i}" data-d="1" title="Nach unten" aria-label="Nach unten" ${i < n - 1 ? '' : 'disabled'}>${ic('mdi:chevron-down')}</button><button class="ib sm danger" data-act="rm" data-path="${P}" data-i="${i}" title="Entfernen" aria-label="Entfernen">${ic('mdi:close')}</button></span>`;
+    return `<span class="mv">${obj && typeof obj === 'object' ? this._eye([...path, i], obj) : ''}<button class="ib sm" data-act="mv" data-path="${P}" data-i="${i}" data-d="-1" title="Nach oben" aria-label="Nach oben" ${i ? '' : 'disabled'}>${ic('mdi:chevron-up')}</button><button class="ib sm" data-act="mv" data-path="${P}" data-i="${i}" data-d="1" title="Nach unten" aria-label="Nach unten" ${i < n - 1 ? '' : 'disabled'}>${ic('mdi:chevron-down')}</button><button class="ib sm danger" data-act="rm" data-path="${P}" data-i="${i}" title="Entfernen" aria-label="Entfernen">${ic('mdi:close')}</button></span>`;
+  }
+  _eye(path, obj){
+    const d = isDraft(obj);
+    return `<button class="ib sm eye ${d ? 'on' : ''}" data-act="entwurf" data-path="${pj(path)}" aria-pressed="${d}" title="${d ? 'Entwurf: in der App ausgeblendet. Antippen schaltet es live.' : 'Live. Antippen macht daraus einen Entwurf (in der App ausgeblendet).'}" aria-label="${d ? 'Entwurf, live schalten' : 'Live, zum Entwurf machen'}">${ic(d ? 'mdi:eye-off-outline' : 'mdi:eye-outline')}</button>`;
   }
   _floors(){ return this._hass.floors || this._floorsWS || {}; }
+  _choices(path, sel, opts){
+    const P = pj(path), on = new Set(sel.map(String));
+    return `<div class="chips">${opts.map(([v, l, icon]) => { const o = on.has(v); return `<button class="chip ${o ? 'on' : ''}" data-act="chip" data-path="${P}" data-val="${esc(v)}" aria-pressed="${o}">${ic(o ? 'mdi:eye-off-outline' : icon)}${esc(l)}</button>`; }).join('')}</div>`;
+  }
   _sitesChips(path, sel){
     const sites = arr(this._draft.standorte), P = pj(path);
     if (!sites.length) return '<p class="help">Lege zuerst einen Standort an.</p>';
@@ -918,7 +944,7 @@ class MultisiteEditor extends HTMLElement {
     return `${chips ? `<div class="chips">${chips}</div>` : ''}<div class="inp"><input type="text" data-add="entity" data-pick="entity" data-dom="${esc(dom || '')}" data-path="${P}" placeholder="+ Entität suchen und hinzufügen" spellcheck="false" autocomplete="off" aria-label="Entität hinzufügen"></div>`;
   }
   _rowsEditor(f, path, items){
-    const rows = items.map((row, i) => `<div class="rowc"><div class="grid">${this._fields(f.fields, [...path, i])}</div>${this._mv(path, i, items.length)}</div>`).join('');
+    const rows = items.map((row, i) => `<div class="rowc ${isDraft(row) ? 'draft' : ''}"><div class="grid">${this._fields(f.fields, [...path, i])}</div>${this._mv(path, i, items.length, row || {})}</div>`).join('');
     return `${rows ? `<div class="rowcs">${rows}</div>` : ''}<button class="add" data-act="add-row" data-path="${pj(path)}">${ic('mdi:plus')}${esc(f.add || 'Hinzufügen')}</button>`;
   }
   _userSelect(base, obj){
@@ -939,7 +965,7 @@ class MultisiteEditor extends HTMLElement {
     else {
       const w = obj.breite || 4, h = obj.hoehe || 3, z = this._peZoom || 1;
       const name = pt => pt.name || (this._hass.states[pt.entity] ? entName(this._hass, this._hass.states[pt.entity]) : pt.entity);
-      const markers = pts.map((pt, i) => `<div class="pe-pt ${armed === i ? 'armed' : ''} ${this._hass.states[pt.entity] ? '' : 'bad'}" data-pt="${i}" style="left:${Number(pt.x) || 0}%;top:${Number(pt.y) || 0}%">${ic(pt.icon || (domainOf(pt.entity) === 'light' ? 'mdi:lightbulb' : 'mdi:power-socket-de'))}<span>${esc(name(pt))}</span></div>`).join('');
+      const markers = pts.map((pt, i) => `<div class="pe-pt ${armed === i ? 'armed' : ''} ${this._hass.states[pt.entity] ? '' : 'bad'} ${isDraft(pt) ? 'draft' : ''}" data-pt="${i}" style="left:${Number(pt.x) || 0}%;top:${Number(pt.y) || 0}%">${ic(pt.icon || (domainOf(pt.entity) === 'light' ? 'mdi:lightbulb' : 'mdi:power-socket-de'))}<span>${esc(name(pt))}</span></div>`).join('');
       const hint = armed != null && pts[armed] ? `Jetzt ins Bild tippen, wo „${esc(name(pts[armed]))}“ sitzt. Esc bricht ab.` : 'Punkte mit der Maus verschieben. Neues Licht: unten suchen, dann ins Bild tippen.';
       top = `<div class="pe-bar"><button class="ib" data-act="pe-zoom" data-d="-1" title="Kleiner" aria-label="Kleiner" ${z > 1 ? '' : 'disabled'}>${ic('mdi:magnify-minus-outline')}</button><button class="ib" data-act="pe-zoom" data-d="1" title="Größer" aria-label="Größer" ${z < 4 ? '' : 'disabled'}>${ic('mdi:magnify-plus-outline')}</button><span class="pe-info">${w} × ${h} px</span>${upload('Bild ersetzen')}</div>
         <div class="pe-scroll"><div class="pe-canvas ${armed != null ? 'arming' : ''}" data-pe="${P}" style="width:${z * 100}%;aspect-ratio:${w} / ${h}"><img data-bild="${esc(obj.bild)}" alt="" draggable="false"><div class="pe-pts">${markers}</div></div></div>
@@ -947,7 +973,7 @@ class MultisiteEditor extends HTMLElement {
     }
     const rows = pts.map((pt, i) => {
       const st = this._hass.states[pt.entity];
-      return `<div class="mrow ${st ? '' : 'bad'} ${armed === i ? 'armed' : ''}"><span class="mrow-ic">${ic(pt.icon || (domainOf(pt.entity) === 'light' ? 'mdi:lightbulb' : 'mdi:power-socket-de'))}</span><span class="mrow-main"><b>${esc(st ? entName(this._hass, st) : pt.entity)}</b><small>${st ? esc(pt.entity) : 'gibt es in Home Assistant nicht'}</small></span><input type="text" data-path="${pj([...pp, i, 'name'])}" value="${esc(pt.name ?? '')}" placeholder="Beschriftung (optional)" aria-label="Beschriftung">${obj.bild ? `<button class="btn ghost" data-act="pe-arm" data-i="${i}">${ic('mdi:crosshairs-gps')}Platzieren</button>` : ''}<button class="ib sm danger" data-act="rm" data-path="${pj(pp)}" data-i="${i}" title="Entfernen" aria-label="Entfernen">${ic('mdi:close')}</button></div>`;
+      return `<div class="mrow ${st ? '' : 'bad'} ${armed === i ? 'armed' : ''} ${isDraft(pt) ? 'draft' : ''}"><span class="mrow-ic">${ic(pt.icon || (domainOf(pt.entity) === 'light' ? 'mdi:lightbulb' : 'mdi:power-socket-de'))}</span><span class="mrow-main"><b>${esc(st ? entName(this._hass, st) : pt.entity)}</b><small>${st ? esc(pt.entity) : 'gibt es in Home Assistant nicht'}</small></span><input type="text" data-path="${pj([...pp, i, 'name'])}" value="${esc(pt.name ?? '')}" placeholder="Beschriftung (optional)" aria-label="Beschriftung">${obj.bild ? `<button class="btn ghost" data-act="pe-arm" data-i="${i}">${ic('mdi:crosshairs-gps')}Platzieren</button>` : ''}${this._eye([...pp, i], pt)}<button class="ib sm danger" data-act="rm" data-path="${pj(pp)}" data-i="${i}" title="Entfernen" aria-label="Entfernen">${ic('mdi:close')}</button></div>`;
     }).join('');
     return `<div class="fld wide pe">${top}${rows ? `<div class="mrows">${rows}</div>` : ''}<div class="inp"><input type="text" data-add="point" data-pick="entity" data-dom="light,switch,fan,input_boolean" data-path="${pj(pp)}" placeholder="+ Licht suchen und auf den Plan setzen" spellcheck="false" autocomplete="off" aria-label="Licht hinzufügen"></div></div>`;
   }
@@ -1163,6 +1189,7 @@ class MultisiteEditor extends HTMLElement {
   }
   _onChange(t){
     if (t.dataset.upload){ const f = t.files && t.files[0]; t.value = ''; this._upload(f, JSON.parse(t.dataset.upload)); return; }
+    if (t.dataset.change === 'pv-drafts'){ this._pvDrafts = t.checked; lsSet('msp-editor-pv-drafts', t.checked ? '1' : '0'); this._schedulePreview(0); return; }
     if (t.dataset.change === 'pv-user'){
       this._pvUser = t.value;
       if (this._preview){ this._preview.hass = this._pvHass(); this._schedulePreview(0); }
@@ -1234,6 +1261,15 @@ class MultisiteEditor extends HTMLElement {
         this._snap();
         if (path.length === 1) this._removeItem(path[0], i);
         else { list.splice(i, 1); if (!list.length) setIn(this._draft, path, undefined); }
+        this._changed(true);
+        break;
+      }
+      case 'entwurf': {
+        const o = getIn(this._draft, JSON.parse(el.dataset.path));
+        if (!o || typeof o !== 'object') break;
+        this._snap();
+        if (isDraft(o)) delete o.entwurf; else o.entwurf = true;
+        this._toast(isDraft(o) ? 'Entwurf – in der App ausgeblendet (nach dem Speichern)' : 'Live – nach dem Speichern für alle sichtbar');
         this._changed(true);
         break;
       }
