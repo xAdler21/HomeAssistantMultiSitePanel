@@ -4,7 +4,7 @@
  * (Konfiguration kommt dann live über den Websocket) oder per panel_custom mit config aus YAML.
  * Keine Build-Schritte und keine externen Abhängigkeiten: Icons kommen von <ha-icon> aus Home Assistant.
  */
-const VERSION = '0.3.0';
+const VERSION = '0.3.1';
 
 /* ---------- Hilfsfunktionen ---------- */
 const nf1 = new Intl.NumberFormat('de-DE', {minimumFractionDigits: 1, maximumFractionDigits: 1});
@@ -139,6 +139,7 @@ function bucketize(pts, t0, t1, step){
 }
 
 /* ---------- Konfiguration ---------- */
+const jaNein = v => v === true || lc(v) === 'ja' ? true : v === false || lc(v) === 'nein' ? false : null;
 function normConfig(raw){
   const c = raw && typeof raw === 'object' ? raw : {};
   const asObj = (v, key) => typeof v === 'string' ? {[key]: v} : (v || {});
@@ -176,8 +177,9 @@ function normConfig(raw){
     cameras: arr(c.kameras).map(a => asObj(a, 'entity')).filter(a => a.entity).map(a => ({entity: a.entity, name: a.name || null, site: a.standort ? String(a.standort) : null})),
     events: arr(c.ereignisse),
     season: c.heizsaison ? asObj(c.heizsaison, 'entity') : null,
-    users: arr(c.benutzer).map(u => ({name: u.name ?? null, id: u.id ?? null, sites: arr(u.standorte).map(String)})),
-    menuButton: c.menue_knopf !== false,
+    users: arr(c.benutzer).map(u => ({name: u.name ?? null, id: u.id ?? null, sites: arr(u.standorte).map(String), menu: jaNein(u.menue_knopf)})),
+    // Menü-Symbol für die HA-Seitenleiste: alle (Standard), nur Admins oder niemand; je Benutzer überschreibbar
+    menuButton: jaNein(c.menue_knopf) === false || lc(c.menue_knopf) === 'niemand' ? 'niemand' : lc(c.menue_knopf) === 'admins' ? 'admins' : 'alle',
     plans: arr(c.plaene).filter(p => p && p.bild).map((p, i) => ({
       id: String(p.id ?? `plan_${i + 1}`), name: p.name || 'Lageplan', site: p.standort ? String(p.standort) : null,
       file: String(p.bild), w: num(p.breite), h: num(p.hoehe),
@@ -933,10 +935,20 @@ class MultisitePanel extends HTMLElement {
 
   /* ---------- Zugriff ---------- */
   _floors(){ return this._hass.floors || this._floorsWS || {}; }
-  _allowedSites(){
+  _userRule(){
     const u = this._hass.user || {};
-    const rule = this._cfg.users.find(r => (r.id && r.id === u.id) || (r.name && lc(r.name) === lc(u.name)));
-    return rule ? this._cfg.sites.filter(s => rule.sites.includes(s.id)) : this._cfg.sites;
+    return this._cfg.users.find(r => (r.id && r.id === u.id) || (r.name && lc(r.name) === lc(u.name))) || null;
+  }
+  /* Eine Regel ohne Standorte schränkt nicht ein (z. B. nur für das Menü-Symbol) */
+  _allowedSites(){
+    const rule = this._userRule();
+    return rule && rule.sites.length ? this._cfg.sites.filter(s => rule.sites.includes(s.id)) : this._cfg.sites;
+  }
+  _menuVisible(){
+    const rule = this._userRule();
+    if (rule && rule.menu != null) return rule.menu;
+    const m = this._cfg.menuButton;
+    return m === 'alle' || (m === 'admins' && !!(this._hass.user && this._hass.user.is_admin));
   }
   _site(id){ return this._cfg.sites.find(s => s.id === id); }
   _siteMatch(id){ return this._st.site === 'alle' ? this._sites.some(s => s.id === id) : this._st.site === id; }
@@ -1154,7 +1166,7 @@ class MultisitePanel extends HTMLElement {
     return `<button class="site-btn" data-act="site-sheet" aria-haspopup="dialog">${ic('mdi:map-marker')}<span>${esc(label)}</span>${ic('mdi:chevron-down', 'dim')}</button>`;
   }
   _rootHeader(title, eyebrow, opts = {}){
-    const menu = this._narrow && this._cfg.menuButton ? `<button class="menu" data-act="menu" aria-label="Home-Assistant-Menü öffnen">${ic('mdi:menu')}</button>` : '';
+    const menu = this._narrow && this._menuVisible() ?`<button class="menu" data-act="menu" aria-label="Home-Assistant-Menü öffnen">${ic('mdi:menu')}</button>` : '';
     return `<header class="lt"><div class="lt-row"><span class="lt-left">${menu}<span class="eyebrow">${esc(eyebrow)}</span></span>${opts.noSite ? '' : this._siteBtn()}</div><h1>${esc(title)}</h1></header>`;
   }
   _pushedHeader(title, eyebrow){ return `<header class="lt pushed"><span class="eyebrow">${esc(eyebrow)}</span><h1>${esc(title)}</h1></header>`; }

@@ -4,7 +4,7 @@
  * Speichert über die Integration direkt in Home Assistant; die App auf allen Geräten aktualisiert sich sofort.
  * Keine Build-Schritte, keine Abhängigkeiten. Unbekannte Schlüssel bleiben beim Bearbeiten erhalten.
  */
-const VERSION = '0.3.0';
+const VERSION = '0.3.1';
 
 /* ---------- Hilfsfunktionen ---------- */
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
@@ -45,11 +45,16 @@ function prep(raw){
   for (const k of ['standorte', 'versorgung', 'geraete', 'szenen', 'benutzer', 'zugang', 'kameras', 'ereignisse', 'favoriten', 'ausblenden', 'plaene']) if (c[k] != null) c[k] = arr(c[k]);
   arr(c.plaene).forEach(p => { if (p.punkte != null) p.punkte = arr(p.punkte); if (p.standort != null) p.standort = String(p.standort); });
   if (typeof c.heizsaison === 'string') c.heizsaison = {entity: c.heizsaison};
+  // Menü-Symbol: alte Form true/false in die Auswahl übersetzen
+  if (c.menue_knopf === false) c.menue_knopf = 'niemand'; else if (c.menue_knopf === true) delete c.menue_knopf;
   for (const k of ['zugang', 'kameras']) if (c[k]) c[k] = c[k].map(x => typeof x === 'string' ? {entity: x} : x);
   arr(c.standorte).forEach(s => { if (s.id != null) s.id = String(s.id); for (const k of ['etagen', 'bereiche']) if (s[k] != null) s[k] = arr(s[k]); });
   arr(c.versorgung).forEach(s => { for (const k of ['versorgt', 'werte', 'geplant']) if (s[k] != null) s[k] = arr(s[k]); if (s.standorte != null) s.standorte = arr(s.standorte).map(String); });
   arr(c.geraete).forEach(g => { for (const k of ['laeuft', 'fertig']) if (g[k] != null) g[k] = arr(g[k]); });
-  arr(c.benutzer).forEach(u => { if (u.standorte != null) u.standorte = arr(u.standorte).map(String); });
+  arr(c.benutzer).forEach(u => {
+    if (u.standorte != null) u.standorte = arr(u.standorte).map(String);
+    if (typeof u.menue_knopf === 'boolean') u.menue_knopf = u.menue_knopf ? 'ja' : 'nein';
+  });
   return c;
 }
 
@@ -141,7 +146,7 @@ const PAGES = {
       {t: 'entities', k: 'favoriten', l: 'Weitere Favoriten', dom: '', wide: true},
     ]),
     G('Darstellung', [
-      {t: 'bool', k: 'menue_knopf', l: 'Menü-Symbol oben links (öffnet die Seitenleiste von Home Assistant)', def: true, wide: true},
+      S('menue_knopf', 'Menü-Symbol oben links sehen', [['', 'Alle'], ['admins', 'Nur Admins'], ['niemand', 'Niemand']], {help: 'Das Symbol öffnet die Seitenleiste von Home Assistant (nur auf dem Handy). Unter Benutzer lässt es sich pro Person anders einstellen.'}),
       {t: 'entities', k: 'ausblenden', l: 'Ausblenden', dom: '', wide: true, help: 'Diese Geräte erscheinen nirgends in der App'},
     ]),
   ],
@@ -296,11 +301,15 @@ const LISTS = {
     add: 'Regel',
     neu: () => ({}),
     title: u => u.name || u.id || 'Benutzer wählen',
-    sub: u => { const n = arr(u.standorte).length; return n ? `sieht ${n} ${n === 1 ? 'Standort' : 'Standorte'}` : 'sieht keinen Standort'; },
+    sub: u => {
+      const n = arr(u.standorte).length, menu = u.menue_knopf === 'ja' ? 'mit Menü' : u.menue_knopf === 'nein' ? 'ohne Menü' : '';
+      return [n ? `sieht ${n} ${n === 1 ? 'Standort' : 'Standorte'}` : 'sieht alle Standorte', menu].filter(Boolean).join(' · ');
+    },
     icon: () => 'mdi:account',
     fields: [G('Regel', [
       {t: 'user', l: 'Benutzer', wide: true},
-      {t: 'sites', k: 'standorte', l: 'Sieht diese Standorte', wide: true},
+      {t: 'sites', k: 'standorte', l: 'Sieht diese Standorte', wide: true, help: 'Keiner ausgewählt: sieht alle Standorte.'},
+      S('menue_knopf', 'Menü-Symbol (Seitenleiste)', [['', 'wie unter Allgemein'], ['ja', 'sieht es'], ['nein', 'sieht es nicht']]),
     ], {help: 'Nur ein Sichtfilter: Home Assistant kennt keine Rechte pro Gerät, technisch kann jeder angemeldete Benutzer alles schalten.'})],
   },
 };

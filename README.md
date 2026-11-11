@@ -77,7 +77,7 @@ Home Assistant bietet eigene Panels nicht als Startseite an, nur Dashboards. Des
 2. Beim Dashboard **⋮ → Als Standard festlegen**.
 
 Zum Bearbeiten dieses Dashboards `?bleiben` an die Adresse hängen, sonst springt es sofort weiter.
-Für Familienmitglieder lässt sich die HA-Seitenleiste im Profil aufräumen. Oben links in der App öffnet ein Menü-Symbol die Seitenleiste; im Editor unter Allgemein lässt es sich ausblenden.
+Für Familienmitglieder lässt sich die HA-Seitenleiste im Profil aufräumen. Oben links in der App öffnet ein Menü-Symbol die Seitenleiste. Wer es sieht, steht im Editor unter Allgemein (alle, nur Admins, niemand); unter Benutzer lässt es sich pro Person anders einstellen.
 
 ## Struktur in Home Assistant
 
@@ -101,8 +101,8 @@ Der Editor deckt alle Schlüssel ab; im YAML-Bereich sieht man sie als Text. Ein
 | `geraete` | Wasch-/Spülmaschine & Co. über `status` oder `leistung` + `schwelle`, optional `restzeit`, `fortschritt`, `programm`, `mitteilung` |
 | `zugang`, `kameras`, `ereignisse` | zusätzliche Türen/Tore/Schlösser und Kameras; Ereignisse für „Heute“ |
 | `szenen` | Szenen, Skripte oder Buttons auf der Startseite |
-| `benutzer` | welcher HA-Benutzer welche Standorte sieht |
-| `menue_knopf` | `false` blendet das Menü-Symbol aus |
+| `benutzer` | je HA-Benutzer `standorte` (leer = alle) und `menue_knopf` (`ja`/`nein`, überschreibt die allgemeine Einstellung) |
+| `menue_knopf` | wer das Menü-Symbol für die HA-Seitenleiste sieht: alle (Standard), `admins` oder `niemand` |
 | `ausblenden` | Entitäten, die nirgends erscheinen |
 
 Leistungen dürfen in W oder kW kommen, Energie in Wh oder kWh, das Panel rechnet um.

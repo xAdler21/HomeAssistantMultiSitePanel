@@ -234,4 +234,8 @@ versorgung:
 # ---------------------------------------------------------------------------
 # benutzer:
 #   - name: Max Mustermann
-#     standorte: [firma]
+#     standorte: [firma]          # leer oder weggelassen: alle Standorte
+#     menue_knopf: nein           # ja/nein, überschreibt menue_knopf unten
+
+# Wer das Menü-Symbol für die HA-Seitenleiste sieht: alle (Standard), admins oder niemand
+# menue_knopf: admins
