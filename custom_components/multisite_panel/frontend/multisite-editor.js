@@ -4,7 +4,7 @@
  * Speichert über die Integration direkt in Home Assistant; die App auf allen Geräten aktualisiert sich sofort.
  * Keine Build-Schritte, keine Abhängigkeiten. Unbekannte Schlüssel bleiben beim Bearbeiten erhalten.
  */
-const VERSION = '0.3.1';
+const VERSION = '0.4.0';
 
 /* ---------- Hilfsfunktionen ---------- */
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
@@ -111,6 +111,11 @@ function relinkSite(c, from, to){
 const ART = [['strom', 'Strom', 'mdi:lightning-bolt', '--c-power'], ['gas', 'Gas', 'mdi:meter-gas', '--c-gas'], ['holz', 'Holz', 'mdi:fireplace', '--c-wood'], ['oel', 'Öl', 'mdi:barrel', '--c-oil'], ['waerme', 'Wärme', 'mdi:radiator', '--c-heat'], ['waermepumpe', 'Wärmepumpe', 'mdi:heat-pump', '--c-heat'], ['wasser', 'Wasser', 'mdi:water', '--c-water'], ['brunnen', 'Brunnen', 'mdi:water-well', '--c-well'], ['internet', 'Internet', 'mdi:web', '--c-net'], ['sonstiges', 'Sonstiges', 'mdi:transmission-tower', '--c-net']];
 const GERAETE = [['waschmaschine', 'Waschmaschine', 'mdi:washing-machine'], ['trockner', 'Trockner', 'mdi:tumble-dryer'], ['spuelmaschine', 'Spülmaschine', 'mdi:dishwasher'], ['backofen', 'Backofen', 'mdi:stove'], ['kaffeemaschine', 'Kaffeemaschine', 'mdi:coffee-maker']];
 const MESSUNG = [['', 'Automatisch'], ['voll', 'Gemessen'], ['teilweise', 'Teilweise gemessen'], ['therme', 'Über die Therme'], ['keine', 'Nicht gemessen'], ['geplant', 'In Vorbereitung'], ['offen', 'Noch nicht angebunden']];
+/* Bereich „Räume zuordnen“: welche Entitäten die App zeigt, sobald sie einen Raum haben */
+const ZU_KINDS = [['light', 'Lichter', 'mdi:lightbulb-outline'], ['switch', 'Schalter', 'mdi:power-socket-de'], ['cover', 'Rollläden & Tore', 'mdi:window-shutter'], ['climate', 'Thermostate', 'mdi:thermostat'], ['sensor', 'Fühler', 'mdi:thermometer'], ['media', 'Medien', 'mdi:television'], ['lock', 'Schlösser', 'mdi:lock-outline'], ['camera', 'Kameras', 'mdi:cctv']];
+const zuKind = (dom, st) => dom === 'light' ? 'light' : dom === 'switch' || dom === 'fan' ? 'switch' : dom === 'cover' ? 'cover' : dom === 'climate' ? 'climate'
+  : dom === 'media_player' ? 'media' : dom === 'lock' ? 'lock' : dom === 'camera' ? 'camera'
+  : dom === 'sensor' && ['temperature', 'humidity'].includes(st.attributes.device_class) ? 'sensor' : null;
 const TABS_WAHL = [['orte', 'Orte', 'mdi:home-group'], ['energie', 'Energie', 'mdi:lightning-bolt'], ['sicherheit', 'Sicherheit', 'mdi:shield-home']];
 const ZUGANG_ART = [['', 'Automatisch'], ['tor', 'Tor'], ['tuer', 'Tür']];
 const art = v => ART.find(a => a[0] === v) || ART[0];
@@ -128,6 +133,7 @@ const isDraft = o => !!o && typeof o === 'object' && (o.entwurf === true || lc(o
 const SECTIONS = [
   {id: 'allgemein', label: 'Allgemein', icon: 'mdi:tune-variant', tab: 'start', desc: 'Wetter, Favoriten und Darstellung der Startseite.'},
   {id: 'standorte', label: 'Standorte', icon: 'mdi:home-group', tab: 'orte', list: 'standorte', desc: 'Jeder Standort fasst Etagen und Räume aus Home Assistant zusammen.'},
+  {id: 'zuordnen', label: 'Räume zuordnen', icon: 'mdi:map-marker-plus-outline', tab: 'orte', page: 'unassigned', desc: 'Lichter, Schalter, Rollläden, Thermostate & Co. erscheinen in der App, sobald sie einen Raum haben. Hier weist du den Raum direkt zu; das wird sofort in Home Assistant gespeichert, ohne „Speichern“.'},
   {id: 'plaene', label: 'Lagepläne', icon: 'mdi:map-outline', tab: 'orte', list: 'plaene', desc: 'Ein Luftbild oder eine Ansicht eures Areals, darauf die Lichter als Knöpfe. Das Bild bleibt in Home Assistant und ist nur angemeldet abrufbar.'},
   {id: 'versorgung', label: 'Energie', icon: 'mdi:lightning-bolt', tab: 'energie', list: 'versorgung', desc: 'Ein Eintrag pro Anschluss: Strom, Gas, Holz, Öl, Wasser, Internet. Thermostate erscheinen im Tab Energie automatisch.'},
   {id: 'geraete', label: 'Geräte', icon: 'mdi:washing-machine', tab: 'start', list: 'geraete', desc: 'Wasch- und Spülmaschine & Co. erscheinen auf der Startseite, solange sie laufen oder fertig sind.'},
@@ -469,6 +475,23 @@ input.chip-add{width:auto;flex:1;min-width:170px;height:32px;border-radius:999px
 .draft-note{display:flex;align-items:flex-start;gap:10px;padding:12px 14px;border-radius:14px;background:var(--warn-bg);color:var(--warn);line-height:1.45}
 .draft-note b{font-weight:700}
 .pe-pt.draft .i{opacity:.55;border-style:dashed}
+.as-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.as-q{flex:1;min-width:220px}
+.as-q ha-icon{position:absolute;left:10px;top:9px;--mdc-icon-size:20px;color:var(--fg-3);pointer-events:none}
+.as-q input{padding-left:38px}
+.chip .cnt{font-style:normal;font-size:11.5px;font-weight:700;min-width:20px;height:20px;padding:0 6px;border-radius:999px;background:var(--warn-bg);color:var(--warn);display:inline-grid;place-items:center}
+.as-row select.as-sel{width:230px;max-width:100%;flex:none}
+.as-row .mrow-main small{overflow-wrap:anywhere}
+.as-row small .warn{color:var(--warn)}
+.as-row small .bad{color:var(--crit)}
+.as-row small .ok{color:var(--ok);display:inline-flex;align-items:center;gap:3px}
+.as-row small .ok .i{--mdc-icon-size:14px}
+.as-row.done{border-color:var(--ok)}
+.as-empty{display:flex;align-items:center;gap:8px;padding:14px;color:var(--fg-2)}
+.as-new{display:flex;gap:8px;flex-wrap:wrap}
+.as-new input{flex:1;min-width:200px}
+.as-new select{width:auto;min-width:150px;flex:none}
+@media (max-width:600px){.as-row select.as-sel{width:100%}}
 .pv-chk{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;color:var(--fg-2);cursor:pointer;white-space:nowrap}
 .pv-chk input{margin:0;accent-color:var(--accent)}
 
@@ -551,15 +574,23 @@ class MultisiteEditor extends HTMLElement {
     const $ = id => this._root.getElementById(id);
     this.$ed = $('ed'); this.$bar = $('bar'); this.$side = $('side'); this.$main = $('main'); this.$pvTop = $('pvTop'); this.$phone = $('phone'); this.$dd = $('dd'); this.$toast = $('toast');
     this._sec = SECTIONS.some(s => s.id === lsGet('msp-editor-sec')) ? lsGet('msp-editor-sec') : 'allgemein';
+    this._secFromUrl();
     this._item = null; this._undo = []; this._redo = []; this._lastType = 0;
     this._users = null; this._pvUser = ''; this._pvOpen = false; this._hints = 0;
     this._pvDrafts = lsGet('msp-editor-pv-drafts') !== '0';   // Vorschau zeigt Entwürfe, bis man es abschaltet
+    this._as = {q: '', kind: 'light', nur: true}; this._asDone = new Set();   // Räume zuordnen
     this._bind();
   }
 
   /* Von Home Assistant gesetzt */
   set hass(h){
+    const old = this._hass;
     this._hass = h;
+    // Register geändert (z. B. Raum zugeordnet oder angelegt): „Räume zuordnen“ nachziehen
+    if (old && this._sec === 'zuordnen' && this._draft){
+      if (old.floors !== h.floors) this._renderMain();
+      else if (old.entities !== h.entities || old.devices !== h.devices || old.areas !== h.areas) this._refreshAssignList();
+    }
     this.toggleAttribute('dark', !!(h.themes && h.themes.darkMode));
     if (this._preview && this._preview.panel) this._preview.hass = this._pvHass();
     if (!h.floors && !this._floorsReq && h.callWS){
@@ -573,7 +604,17 @@ class MultisiteEditor extends HTMLElement {
   get panel(){ return this._panel; }
   set narrow(n){ if (this._narrow !== n){ this._narrow = n; this._renderBar(); } }
   get narrow(){ return this._narrow; }
-  set route(r){ this._route = r; }
+  set route(r){ this._route = r; if (this._secFromUrl() && this._draft){ this._item = null; this._renderAll(); this._syncPreview(); } }
+  /* ?bereich=zuordnen öffnet direkt einen Bereich (Link aus der App) */
+  _secFromUrl(){
+    // Jede Adresse nur einmal auswerten, sonst springt der Editor bei jedem route-Update zurück
+    if (location.search === this._urlSeen) return false;
+    this._urlSeen = location.search;
+    let b = null; try { b = new URLSearchParams(location.search).get('bereich'); } catch (e) { /* egal */ }
+    if (!b || b === this._sec || !SECTIONS.some(s => s.id === b)) return false;
+    this._sec = b; lsSet('msp-editor-sec', b);
+    return true;
+  }
   get route(){ return this._route; }
 
   connectedCallback(){
@@ -721,6 +762,7 @@ class MultisiteEditor extends HTMLElement {
       if (it && s.list === 'standorte'){ page = 'site'; id = String(it.id ?? `standort_${this._item + 1}`); }
       if (it && s.list === 'versorgung'){ page = 'supply'; id = String(it.id ?? `versorgung_${this._item + 1}`); }
       if (it && s.list === 'plaene' && it.bild){ page = 'plan'; id = String(it.id ?? `plan_${this._item + 1}`); }
+      if (s.page) page = s.page;
       this._pvNav = {tab: s.tab, page, id};
     }
     this._schedulePreview(0);
@@ -775,6 +817,7 @@ class MultisiteEditor extends HTMLElement {
     const keep = key === this._mainKey ? this.$main.scrollTop : 0;
     let html;
     if (s.id === 'code') html = this._codeView(s);
+    else if (s.id === 'zuordnen') html = this._assignView(s);
     else if (s.list && this._item == null) html = this._listView(s);
     else if (s.list) html = this._itemView(s);
     else html = this._head(s) + this._fields(PAGES[s.id], []);
@@ -953,6 +996,141 @@ class MultisiteEditor extends HTMLElement {
     if (!users.length) return `<input type="text" data-path="${pj([...base, 'name'])}" value="${esc(obj.name ?? '')}" placeholder="Name wie in Home Assistant" aria-label="Benutzer">`;
     const cur = users.find(u => (obj.id && u.id === obj.id) || (obj.name && lc(u.name) === lc(obj.name)));
     return `<select data-path="${pj(base)}" data-type="user" aria-label="Benutzer"><option value="">— Benutzer wählen —</option>${users.map(u => `<option value="${esc(u.id)}" ${cur && cur.id === u.id ? 'selected' : ''}>${esc(u.name)}${u.admin ? ' (Admin)' : ''}</option>`).join('')}${!cur && (obj.name || obj.id) ? `<option value="" selected>${esc(obj.name || obj.id)} (unbekannt)</option>` : ''}</select>`;
+  }
+
+  /* ---------- Räume zuordnen: schreibt direkt in die Register von Home Assistant ---------- */
+  /* Alle Entitäten, die die App anzeigen würde, mit ihrem Raum (eigener Raum vor dem des Geräts) */
+  _assignItems(){
+    const h = this._hass, ents = h.entities || {}, devs = h.devices || {}, out = [], perDev = {};
+    for (const eid of Object.keys(h.states)){
+      const st = h.states[eid], kind = zuKind(domainOf(eid), st);
+      if (!kind) continue;
+      const r = ents[eid];
+      if (r && (r.hidden || r.entity_category)) continue;
+      const dev = r && r.device_id ? devs[r.device_id] : null;
+      const it = {eid, kind, name: entName(h, st), reg: !!r, dev: (r && r.device_id) || null, own: !!(r && r.area_id), area: (r && r.area_id) || (dev && dev.area_id) || null};
+      if (it.dev) perDev[it.dev] = (perDev[it.dev] || 0) + 1;
+      out.push(it);
+    }
+    out.forEach(it => { it.siblings = it.dev ? perDev[it.dev] - 1 : 0; });
+    return out.sort((a, b) => a.name.localeCompare(b.name, 'de'));
+  }
+  /* Räume, die über die Standorte (Etagen bzw. weitere Räume) in der App vorkommen */
+  _siteAreas(){
+    const floors = Object.values(this._floors()), areas = Object.values(this._hass.areas || {}), out = new Set();
+    for (const s of arr(this._draft && this._draft.standorte)){
+      for (const f of arr(s.etagen)){
+        const ref = String(f && typeof f === 'object' ? f.id ?? f.name : f);
+        const fl = floors.find(x => x.floor_id === ref) || floors.find(x => lc(x.name) === lc(ref));
+        if (fl) areas.filter(a => a.floor_id === fl.floor_id).forEach(a => out.add(a.area_id));
+      }
+      for (const r of arr(s.bereiche)){ const a = areas.find(x => x.area_id === r) || areas.find(x => lc(x.name) === lc(r)); if (a) out.add(a.area_id); }
+    }
+    return out;
+  }
+  _areaOptions(cur){
+    const floors = Object.values(this._floors()).sort((a, b) => (b.level ?? 0) - (a.level ?? 0) || String(a.name).localeCompare(b.name, 'de'));
+    const areas = Object.values(this._hass.areas || {}).sort((a, b) => String(a.name).localeCompare(b.name, 'de'));
+    const opt = a => `<option value="${esc(a.area_id)}" ${a.area_id === cur ? 'selected' : ''}>${esc(a.name)}</option>`;
+    const groups = floors.map(f => { const l = areas.filter(a => a.floor_id === f.floor_id); return l.length ? `<optgroup label="${esc(f.name)}">${l.map(opt).join('')}</optgroup>` : ''; }).join('');
+    const loose = areas.filter(a => !a.floor_id || !floors.some(f => f.floor_id === a.floor_id));
+    return `<option value="">— kein Raum —</option>${groups}${loose.length ? `<optgroup label="Ohne Etage">${loose.map(opt).join('')}</optgroup>` : ''}`;
+  }
+  _assignView(s){
+    const as = this._as, items = this._assignItems(), chips = this._assignChips(items);
+    const floors = Object.values(this._floors()).sort((a, b) => (b.level ?? 0) - (a.level ?? 0) || String(a.name).localeCompare(b.name, 'de'));
+    const sites = arr(this._draft.standorte);
+    return this._head(s) + `
+      <section class="grp"><h2>Zuordnen</h2>
+        <div class="as-bar"><div class="inp as-q">${ic('mdi:magnify')}<input type="text" id="asq" data-as="q" value="${esc(as.q)}" placeholder="Suchen: Name, Raum oder light.…" spellcheck="false" autocomplete="off" aria-label="Suchen"></div>
+          <label class="pv-chk"><input type="checkbox" data-as="nur" ${as.nur ? 'checked' : ''}>nur ohne Raum</label></div>
+        <div class="chips" id="asChips">${chips}</div>
+        <div id="asList">${this._assignList(items)}</div>
+      </section>
+      <section class="grp"><h2>Raum oder Etage anlegen</h2>
+        <p class="help">Fehlt ein Raum in der Auswahl? Hier anlegen, er landet sofort in Home Assistant. Neue Etagen lassen sich gleich einem Standort zuordnen (das ändert die Panel-Konfiguration, dann „Speichern“).</p>
+        <div class="as-new"><input type="text" id="asRoom" placeholder="Neuer Raum, z. B. Werkstatt hinten" aria-label="Name des neuen Raums">
+          <select id="asRoomFloor" aria-label="Etage des neuen Raums"><option value="">ohne Etage</option>${floors.map(f => `<option value="${esc(f.floor_id)}" ${f.floor_id === this._asLastFloor ? 'selected' : ''}>auf ${esc(f.name)}</option>`).join('')}</select>
+          <button class="btn" data-act="as-room">${ic('mdi:plus')}Raum anlegen</button></div>
+        <div class="as-new"><input type="text" id="asFloor" placeholder="Neue Etage, z. B. Neue Halle" aria-label="Name der neuen Etage">
+          <select id="asFloorSite" aria-label="Standort der neuen Etage"><option value="">keinem Standort</option>${sites.map(x => `<option value="${esc(x.id)}">zu ${esc(x.kurz || x.name || x.id)}</option>`).join('')}</select>
+          <button class="btn ghost" data-act="as-floor">${ic('mdi:plus')}Etage anlegen</button></div>
+      </section>`;
+  }
+  _assignList(items = this._assignItems()){
+    const as = this._as, toks = lc(as.q).split(/\s+/).filter(Boolean), areaMap = this._hass.areas || {}, inSite = this._siteAreas();
+    const list = items.filter(it => it.kind === as.kind && (!as.nur || !it.area || this._asDone.has(it.eid)) && (!toks.length || toks.every(t => it.eid.includes(t) || lc(it.name).includes(t) || lc((areaMap[it.area] || {}).name).includes(t))));
+    if (!list.length) return `<div class="as-empty">${ic('mdi:check-circle-outline')}${as.nur && !toks.length ? 'Hier hat schon alles einen Raum.' : 'Nichts gefunden.'}</div>`;
+    const shown = list.slice(0, 150);
+    const rows = shown.map(it => {
+      const st = this._hass.states[it.eid], a = it.area && areaMap[it.area];
+      const canToggle = ['light', 'switch'].includes(it.kind) && st.state !== 'unavailable';
+      let note;
+      if (!it.reg) note = '<span class="bad">Ohne eindeutige ID in Home Assistant, lässt sich nicht zuordnen</span>';
+      else if (a && !inSite.has(it.area)) note = '<span class="warn">Raum gehört zu keinem Standort, erscheint noch nicht in der App</span>';
+      else if (this._asDone.has(it.eid) && a) note = `<span class="ok">${ic('mdi:check')}in ${esc(a.name)}</span>`;
+      else note = esc(it.eid) + (it.siblings ? ` · Gerät mit ${it.siblings + 1} Kanälen, nur dieser Kanal` : '');
+      return `<div class="mrow as-row ${this._asDone.has(it.eid) ? 'done' : ''}"><span class="mrow-ic">${ic(st.attributes.icon || ZU_KINDS.find(k => k[0] === it.kind)[2])}</span><span class="mrow-main"><b>${esc(it.name)}</b><small>${note}</small></span>${canToggle ? `<button class="ib sm" data-act="as-toggle" data-id="${esc(it.eid)}" title="Ein/aus schalten, um es zu finden" aria-label="Ein/aus schalten">${ic(st.state === 'on' ? 'mdi:lightbulb-on' : 'mdi:lightbulb-outline')}</button>` : ''}<select class="as-sel" data-as-eid="${esc(it.eid)}" ${it.reg ? '' : 'disabled'} aria-label="Raum für ${esc(it.name)}">${this._areaOptions(it.area)}</select></div>`;
+    }).join('');
+    return `<div class="mrows">${rows}</div>${list.length > shown.length ? `<p class="help">… und ${list.length - shown.length} weitere. Suche eingrenzen.</p>` : ''}`;
+  }
+  /* Arten als Auswahl, die Zahl zeigt, wie viele noch keinen Raum haben */
+  _assignChips(items){
+    const as = this._as, open = items.filter(it => !it.area);
+    return ZU_KINDS.map(([k, l, icon]) => {
+      const n = open.filter(it => it.kind === k).length, all = items.filter(it => it.kind === k).length;
+      if (!all) return '';
+      return `<button class="chip ${as.kind === k ? 'on' : ''}" data-act="as-kind" data-k="${k}" aria-pressed="${as.kind === k}">${ic(icon)}${esc(l)}${n ? `<em class="cnt">${n}</em>` : ''}</button>`;
+    }).join('');
+  }
+  /* Nur Liste und Zähler neu zeichnen, damit Suche und Eingaben den Fokus behalten */
+  _refreshAssignList(){
+    const el = this._root.getElementById('asList'); if (!el) return;
+    const items = this._assignItems();
+    el.innerHTML = this._assignList(items);
+    const c = this._root.getElementById('asChips'); if (c) c.innerHTML = this._assignChips(items);
+  }
+  /* Ein Gerät mit nur einem sichtbaren Kanal bekommt den Raum als Gerät (Sensoren usw. ziehen mit),
+     sonst nur diese Entität, damit sich z. B. zweikanalige Aktoren auf zwei Räume verteilen lassen. */
+  async _assign(eid, areaId){
+    const it = this._assignItems().find(x => x.eid === eid); if (!it) return;
+    const area = areaId || null, h = this._hass;
+    try {
+      if (it.dev && !it.siblings){
+        await h.callWS({type: 'config/device_registry/update', device_id: it.dev, area_id: area});
+        if (it.own) await h.callWS({type: 'config/entity_registry/update', entity_id: eid, area_id: null});
+      } else await h.callWS({type: 'config/entity_registry/update', entity_id: eid, area_id: area});
+      this._asDone.add(eid);
+      const a = area && (h.areas || {})[area];
+      this._toast(a ? `${it.name} → ${a.name}` : `${it.name}: Raum entfernt`);
+    } catch (e){ this._toast(`Zuordnen fehlgeschlagen: ${(e && e.message) || e}`, true); this._refreshAssignList(); }
+  }
+  async _createRoom(){
+    const inp = this._root.getElementById('asRoom'), fl = this._root.getElementById('asRoomFloor');
+    const name = inp && inp.value.trim(); if (!name) { if (inp) inp.focus(); return; }
+    if (Object.values(this._hass.areas || {}).some(a => lc(a.name) === lc(name))){ this._toast(`Einen Raum „${name}“ gibt es schon`, true); return; }
+    try {
+      this._asLastFloor = fl.value || '';
+      await this._hass.callWS({type: 'config/area_registry/create', name, floor_id: fl.value || null});
+      inp.value = '';
+      this._toast(`Raum „${name}“ angelegt`);
+    } catch (e){ this._toast(`Raum anlegen fehlgeschlagen: ${(e && e.message) || e}`, true); }
+  }
+  async _createFloor(){
+    const inp = this._root.getElementById('asFloor'), siteSel = this._root.getElementById('asFloorSite');
+    const name = inp && inp.value.trim(); if (!name) { if (inp) inp.focus(); return; }
+    if (Object.values(this._floors()).some(f => lc(f.name) === lc(name))){ this._toast(`Eine Etage „${name}“ gibt es schon`, true); return; }
+    try {
+      const fl = await this._hass.callWS({type: 'config/floor_registry/create', name});
+      if (!this._hass.floors) this._floorsWS = {...(this._floorsWS || {}), [fl.floor_id]: fl};
+      this._asLastFloor = fl.floor_id;
+      const site = siteSel && siteSel.value && arr(this._draft.standorte).find(x => String(x.id) === siteSel.value);
+      if (site){
+        this._snap(); site.etagen = [...arr(site.etagen), fl.floor_id]; this._changed();
+        this._toast(`Etage „${name}“ angelegt und ${site.kurz || site.name} zugeordnet – „Speichern“ nicht vergessen`);
+      } else this._toast(`Etage „${name}“ angelegt`);
+      this._renderMain();
+    } catch (e){ this._toast(`Etage anlegen fehlgeschlagen: ${(e && e.message) || e}`, true); }
   }
 
   /* ---------- Lageplan: Bild hochladen, Lichter platzieren ---------- */
@@ -1153,6 +1331,7 @@ class MultisiteEditor extends HTMLElement {
   }
   _onKey(ev){
     const t = ev.target;
+    if (ev.key === 'Enter' && (t.id === 'asRoom' || t.id === 'asFloor')){ ev.preventDefault(); if (t.id === 'asRoom') this._createRoom(); else this._createFloor(); return; }
     if (t.dataset && t.dataset.pick && this._pickItems && !this.$dd.hidden){
       const n = this._pickItems.length;
       if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp'){ ev.preventDefault(); this._pickAct = (this._pickAct + (ev.key === 'ArrowDown' ? 1 : -1) + n) % n; this._markPick(); return; }
@@ -1170,6 +1349,7 @@ class MultisiteEditor extends HTMLElement {
   }
   _onInput(t){
     if (t.id === 'yaml'){ this._yaml = t.value; return; }
+    if (t.dataset.as === 'q'){ this._as.q = t.value; this._refreshAssignList(); return; }
     if (t.dataset.pick){ if (this._pickInput !== t){ this._pickInput = t; this._pickAct = 0; } this._updatePick(); }
     const type = t.dataset.type;
     if (t.dataset.add || !t.dataset.path || type === 'select' || type === 'bool' || type === 'user') return;
@@ -1189,6 +1369,8 @@ class MultisiteEditor extends HTMLElement {
   }
   _onChange(t){
     if (t.dataset.upload){ const f = t.files && t.files[0]; t.value = ''; this._upload(f, JSON.parse(t.dataset.upload)); return; }
+    if (t.dataset.as === 'nur'){ this._as.nur = t.checked; this._refreshAssignList(); return; }
+    if (t.dataset.asEid){ this._assign(t.dataset.asEid, t.value); return; }
     if (t.dataset.change === 'pv-drafts'){ this._pvDrafts = t.checked; lsSet('msp-editor-pv-drafts', t.checked ? '1' : '0'); this._schedulePreview(0); return; }
     if (t.dataset.change === 'pv-user'){
       this._pvUser = t.value;
@@ -1264,6 +1446,16 @@ class MultisiteEditor extends HTMLElement {
         this._changed(true);
         break;
       }
+      case 'as-kind': this._as.kind = el.dataset.k; this._refreshAssignList(); break;
+      case 'as-toggle': {
+        // Zum Finden einmal schalten; das Symbol wechselt gleich mit (die Liste wird bei Zustandsänderungen nicht neu gezeichnet)
+        const id = el.dataset.id, i = el.querySelector('ha-icon');
+        this._hass.callService(domainOf(id), 'toggle', {entity_id: id});
+        if (i) i.setAttribute('icon', i.getAttribute('icon') === 'mdi:lightbulb-on' ? 'mdi:lightbulb-outline' : 'mdi:lightbulb-on');
+        break;
+      }
+      case 'as-room': this._createRoom(); break;
+      case 'as-floor': this._createFloor(); break;
       case 'entwurf': {
         const o = getIn(this._draft, JSON.parse(el.dataset.path));
         if (!o || typeof o !== 'object') break;

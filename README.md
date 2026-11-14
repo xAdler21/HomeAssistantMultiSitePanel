@@ -4,11 +4,12 @@ Eine eigene, app-artige Oberfläche für Home Assistant, gedacht fürs iPhone: S
 
 - **Start:** Begrüßung, Wetter, Hinweise (Tor offen, Waschmaschine fertig, Internet weg), Szenen, Favoriten, was gerade läuft, Solar jetzt
 - **Orte:** Lagepläne mit Licht-Knöpfen, dann Standort → Etage → Raum mit Licht, Heizung, Rollläden, Geräten und Raumklima
-- **Heizung:** Wärmequellen, Heizbetrieb Winter/Sommer, alle Thermostate
-- **Versorgung:** jeder Anschluss (Strom, Gas, Holz, Öl, Wasser, Brunnen, Internet) mit Werten, Tagesverlauf und welche Gebäude er versorgt
+- **Energie:** jeder Anschluss (Strom, Gas, Holz, Öl, Wasser, Brunnen, Internet) mit Werten, Tagesverlauf und welche Gebäude er versorgt, dazu alle Thermostate
 - **Sicherheit:** Türen, Tore, Schlösser, Kameras und die Ereignisse von heute
 
-Die Struktur kommt aus Home Assistant selbst (Etagen und Räume). Neue Geräte erscheinen automatisch, sobald sie einem Raum zugeordnet sind.
+Die Struktur kommt aus Home Assistant selbst (Etagen und Räume). Lichter, Thermostate, Rollläden usw. legt man im Panel nicht an: Sie erscheinen automatisch, sobald sie in Home Assistant einem Raum zugeordnet sind und die Etage des Raums zu einem Standort gehört.
+
+Alles lässt sich als **Entwurf** vorbereiten: Standorte, Anschlüsse, Lagepläne, Geräte, Szenen, einzelne Zeilen und ganze Bereiche unten. Entwürfe sind in der App für alle ausgeblendet, bis man sie im Editor live schaltet.
 
 Eingerichtet wird alles im **Editor** („Zuhause bearbeiten“ in der Seitenleiste, nur für Admins): links die Bereiche, in der Mitte die Formulare mit Suche nach Entitäten, rechts die echte App als Live-Vorschau. „Speichern“ schreibt direkt in Home Assistant, die App auf allen Geräten zeigt die Änderung sofort, ohne Neustart.
 
@@ -33,13 +34,15 @@ Beim ersten Start übernimmt die Integration eine vorhandene `/homeassistant/art
 ### Umstieg von der YAML-Variante (Version 0.1)
 
 1. Integration wie oben installieren, **noch nicht** einrichten.
-2. In `/homeassistant/art_configs/multisite_panel.yaml` den Block `panel_custom:` löschen (die Helfer `input_select`/`input_boolean` dürfen bleiben, siehe `beispiel/art_configs/`).
+2. In `/homeassistant/art_configs/multisite_panel.yaml` den Block `panel_custom:` löschen (der Helfer `input_boolean` darf bleiben, siehe `beispiel/art_configs/`; `input_select.heizsaison` braucht es seit 0.4 nicht mehr).
 3. Die alte Datei `/homeassistant/www/art_custom/multisite-panel.js` löschen und, falls angelegt, die Dashboard-Ressource `/local/art_custom/multisite-panel.js` entfernen. Sonst lädt der Browser die alte Version und die neue kann sich nicht anmelden.
 4. Home Assistant neu starten, dann die Integration hinzufügen. `art_custom/multisite-panel.yaml` wird dabei übernommen und kann danach als Sicherung liegen bleiben.
 
 ## Editor
 
-- **Bereiche:** Allgemein, Standorte, Lagepläne, Versorgung, Heizung, Geräte, Szenen, Sicherheit, Benutzer und YAML.
+- **Bereiche:** Allgemein, Standorte, Räume zuordnen, Lagepläne, Energie, Geräte, Szenen, Sicherheit, Benutzer und YAML.
+- **Räume zuordnen:** alle Lichter, Schalter, Rollläden, Thermostate, Fühler, Medien, Schlösser und Kameras mit einer Raumauswahl. Die Auswahl wird sofort in Home Assistant gespeichert, ohne „Speichern“. Das Glühbirnen-Symbol schaltet ein Licht kurz um, damit man es vor Ort findet. Fehlende Räume und Etagen lassen sich dort direkt anlegen, neue Etagen gleich einem Standort zuordnen. Hat ein Gerät nur einen solchen Kanal, bekommt das ganze Gerät den Raum (seine Sensoren ziehen mit); bei mehreren Kanälen (z. B. zweikanaliger Aktor) nur der eine Kanal. In der App führt **Orte → Nicht zugeordnet** mit einem Knopf direkt dorthin.
+- **Entwurf/Live:** Jeder Eintrag hat oben den Schalter „Live in der App“, jede Zeile und jedes Licht im Lageplan ein Auge-Symbol. Aus = Entwurf: in der App für alle unsichtbar, im Editor bleibt alles erhalten. Ganze Bereiche unten (Orte, Energie, Sicherheit) stehen unter Allgemein → Entwürfe. In der Vorschau blendet „Entwürfe zeigen“ sie ein oder aus.
 - **Entitäten** sucht man per Name oder ID; unter dem Feld steht der aktuelle Wert oder ein Hinweis, wenn es die Entität nicht gibt. Listen zeigen fehlende Entitäten als Warnung.
 - **Etagen und Räume** kommen als Auswahl direkt aus Home Assistant.
 - **Sortieren** per Ziehen oder mit den Pfeilen, **Rückgängig/Wiederholen** mit Strg+Z/Strg+Y, **Speichern** mit Strg+S.
@@ -82,7 +85,7 @@ Für Familienmitglieder lässt sich die HA-Seitenleiste im Profil aufräumen. Ob
 ## Struktur in Home Assistant
 
 - **Etage** = ein Gebäude oder ein Stockwerk eines Gebäudes (Einstellungen → Bereiche → Etage hinzufügen), z. B. „Werkstatt“, „Büro“, „Halle Nord“.
-- **Räume** den Etagen zuordnen, **Geräte** den Räumen.
+- **Räume** den Etagen zuordnen, **Geräte** den Räumen (am schnellsten im Editor unter „Räume zuordnen“).
 - **Favoriten:** Geräten das Label `favorit` geben.
 - Was noch keinem Raum zugeordnet ist, zeigt **Orte → Nicht zugeordnet** (nur für Admins).
 
@@ -96,14 +99,15 @@ Der Editor deckt alle Schlüssel ab; im YAML-Bereich sieht man sie als Text. Ein
 | `plaene` | Lagepläne mit `name`, `standort`, `bild` (vom Editor vergeben), `breite`, `hoehe`, `punkte` (`entity`, `x`, `y` in Prozent, optional `name`, `icon`) |
 | `wetter`, `aussentemperatur` | Wetter-Entität und Außenfühler für die Startseite |
 | `favoriten_label`, `favoriten` | Label (Standard `favorit`) und/oder Liste von Entitäten |
-| `versorgung` | Anschlüsse mit `art`, `standorte`, `messung`, `leistung`, `solar`, `netz`, `*_heute`, `status`, `werte`, `versorgt`, `saison`, `hinweis`, `geplant` |
-| `heizsaison` | optional `entity` (input_select mit „Winter“/„Sommer“), sonst Oktober bis April = Winter |
+| `versorgung` | Anschlüsse mit `art`, `standorte`, `messung`, `leistung`, `solar`, `netz`, `*_heute`, `status`, `werte`, `versorgt`, `hinweis`, `geplant` |
 | `geraete` | Wasch-/Spülmaschine & Co. über `status` oder `leistung` + `schwelle`, optional `restzeit`, `fortschritt`, `programm`, `mitteilung` |
 | `zugang`, `kameras`, `ereignisse` | zusätzliche Türen/Tore/Schlösser und Kameras; Ereignisse für „Heute“ |
 | `szenen` | Szenen, Skripte oder Buttons auf der Startseite |
 | `benutzer` | je HA-Benutzer `standorte` (leer = alle) und `menue_knopf` (`ja`/`nein`, überschreibt die allgemeine Einstellung) |
 | `menue_knopf` | wer das Menü-Symbol für die HA-Seitenleiste sieht: alle (Standard), `admins` oder `niemand` |
 | `ausblenden` | Entitäten, die nirgends erscheinen |
+| `entwurf: true` | an jedem Listeneintrag (Standort, Anschluss, Zeile unter `versorgt`/`werte`, Gerät, Szene, Zugang, Kamera, Lageplan, Punkt, Benutzerregel): vorbereitet, aber in der App für alle ausgeblendet |
+| `tabs_entwurf` | Bereiche unten, die noch Entwurf sind: `orte`, `energie`, `sicherheit` |
 
 Leistungen dürfen in W oder kW kommen, Energie in Wh oder kWh, das Panel rechnet um.
 

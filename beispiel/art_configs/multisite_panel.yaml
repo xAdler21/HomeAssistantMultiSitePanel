@@ -6,15 +6,6 @@
 # Das Panel selbst meldet seit Version 0.2 die Integration multisite_panel an. Hier also KEIN
 # panel_custom mehr eintragen, sonst ist die Adresse /zuhause doppelt belegt.
 
-# Umschalter für den Heizbetrieb (im Editor unter Heizung → Umschalter auswählen)
-input_select:
-  heizsaison:
-    name: Heizsaison
-    options:
-      - Winter
-      - Sommer
-    icon: mdi:sun-snowflake-variant
-
 # Schalter „Mitteilung, wenn fertig“ für die Waschmaschine (im Editor unter Geräte)
 input_boolean:
   waschmaschine_mitteilung:

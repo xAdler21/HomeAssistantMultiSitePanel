@@ -85,17 +85,14 @@ standorte:
 #         y: 61.2
 
 # ---------------------------------------------------------------------------
-# Heizbetrieb Winter/Sommer (z. B. Holz im Winter, Öl im Sommer)
-# Ohne entity gilt automatisch: Oktober bis April = Winter.
-# Mit einem input_select (Optionen „Winter“ und „Sommer“) kann man in der App umschalten.
+# Entwürfe: Jeder Listeneintrag (auch Zeilen unter versorgt/werte und Punkte im Lageplan)
+# kann „entwurf: true“ bekommen. Er ist dann vorbereitet, aber in der App für alle ausgeblendet.
+# Ganze Bereiche unten ausblenden: orte, energie, sicherheit
 # ---------------------------------------------------------------------------
-heizsaison:
-  # entity: input_select.heizsaison
-  titel: Heizbetrieb
-  text: Holz im Winter, Öl im Sommer
+# tabs_entwurf: [sicherheit]
 
 # ---------------------------------------------------------------------------
-# Versorgung: ein Eintrag pro Anschluss
+# Energie (Tab „Energie“): ein Eintrag pro Anschluss. Thermostate erscheinen dort automatisch.
 # art: strom | gas | holz | oel | waerme | waermepumpe | wasser | brunnen | internet | sonstiges
 # messung: voll | teilweise | therme | keine | geplant | offen
 # leistung/solar/netz: aktuelle Leistung in W oder kW (netz: + Bezug, − Einspeisung; sonst netz_umkehren: true)
@@ -166,7 +163,7 @@ versorgung:
     art: holz
     name: Holzheizung
     standorte: [firma, birke]
-    saison: winter
+    entwurf: true              # noch nicht angebunden: für alle ausgeblendet
     messung: offen
     beschreibung: Büro, Wohnung · im Winter auch Birkenweg 7
 
@@ -175,7 +172,6 @@ versorgung:
     name: Ölheizung
     ort: Birkenweg 7
     standorte: [birke]
-    saison: sommer
     messung: offen
 
   - id: brunnen

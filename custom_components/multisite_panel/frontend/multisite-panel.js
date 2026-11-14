@@ -4,7 +4,7 @@
  * (Konfiguration kommt dann live über den Websocket) oder per panel_custom mit config aus YAML.
  * Keine Build-Schritte und keine externen Abhängigkeiten: Icons kommen von <ha-icon> aus Home Assistant.
  */
-const VERSION = '0.3.1';
+const VERSION = '0.4.0';
 
 /* ---------- Hilfsfunktionen ---------- */
 const nf1 = new Intl.NumberFormat('de-DE', {minimumFractionDigits: 1, maximumFractionDigits: 1});
@@ -1537,7 +1537,11 @@ class MultisitePanel extends HTMLElement {
       const shown = list.slice(0, 60);
       return this._sec(`${KIND_LABEL[k]} (${list.length})`, `<div class="list">${shown.map(e => { const a = ix.entArea[e]; return `<button class="row" data-act="more" data-id="${esc(e)}"><span class="row-main"><span class="row-title">${esc(this._name(e))}</span><span class="row-sub"><code>${esc(e)}</code>${a ? ` · Raum „${esc(this._areaName(a))}“ gehört zu keinem Standort` : ''}</span></span>${ic('mdi:chevron-right', 'chev')}</button>`; }).join('')}</div>${list.length > shown.length ? `<p class="hint">… und ${list.length - shown.length} weitere.</p>` : ''}`);
     }).join('');
-    return {nav: this._navBar('Nicht zugeordnet'), body: this._pushedHeader('Nicht zugeordnet', `${ix.unassigned.length} Geräte`) + this._note('Diese Geräte haben keinen Raum oder ihr Raum gehört zu keinem Standort. Tippe ein Gerät an und weise ihm in Home Assistant unter Einstellungen einen Raum zu. Danach erscheint es automatisch in der App.') + (body || '<div class="card empty">Alles zugeordnet.</div>')};
+    const ed = this._editorUrl();
+    const btn = ed && ix.unassigned.length ? `<button class="btn wide" data-act="editor" data-bereich="zuordnen">${ic('mdi:map-marker-plus-outline')}Im Editor Räume zuordnen</button>` : '';
+    const text = ed ? 'Diese Geräte haben keinen Raum oder ihr Raum gehört zu keinem Standort. Am schnellsten geht das Zuordnen im Editor unter „Räume zuordnen“: Raum auswählen, fertig. Danach erscheint das Gerät automatisch in der App.'
+      : 'Diese Geräte haben keinen Raum oder ihr Raum gehört zu keinem Standort. Tippe ein Gerät an und weise ihm in Home Assistant unter Einstellungen einen Raum zu. Danach erscheint es automatisch in der App.';
+    return {nav: this._navBar('Nicht zugeordnet'), body: this._pushedHeader('Nicht zugeordnet', `${ix.unassigned.length} Geräte`) + this._note(text) + btn + (body || '<div class="card empty">Alles zugeordnet.</div>')};
   }
 
   _pCheck(){
@@ -1988,7 +1992,7 @@ class MultisitePanel extends HTMLElement {
         case 'push': this._closeSheet(); this._push(el.dataset.page, id); break;
         case 'back': this._back(); break;
         case 'menu': this.dispatchEvent(new CustomEvent('hass-toggle-menu', {bubbles: true, composed: true})); break;
-        case 'editor': { const url = this._editorUrl(); if (url){ history.pushState(null, '', url); window.dispatchEvent(new CustomEvent('location-changed')); } break; }
+        case 'editor': { const url = this._editorUrl(); if (url){ history.pushState(null, '', el.dataset.bereich ? `${url}?bereich=${encodeURIComponent(el.dataset.bereich)}` : url); window.dispatchEvent(new CustomEvent('location-changed')); } break; }
         case 'site-sheet': this._openSheet('site'); break;
         case 'lights-sheet': this._openSheet('lights'); break;
         case 'set-site': this._st.site = id; lsSet(this._lsKey('site'), id); this._closeSheet(); this._render(); this.$screen.scrollTop = 0; break;

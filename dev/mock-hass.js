@@ -3,6 +3,7 @@
 // (eigene Daten, nicht im Repository), sonst dev/demo-daten.js (erfundenes Beispiel).
 
 const MIN = 60000;
+const lc = s => String(s ?? '').toLowerCase().trim();
 const ago = m => new Date(Date.now() - m * MIN).toISOString();
 
 /* Bausteine für die Datenmodule */
@@ -96,8 +97,40 @@ export function createMockHass(daten, onChange){
     resolve({});
   }, 150));
 
+  // Register ändern (Räume zuordnen, Raum/Etage anlegen): neues hass-Objekt wie in Home Assistant
+  const slug = name => lc(name).normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/ß/g, 'ss').replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || 'neu';
+  const freeId = (map, base) => { let id = base, n = 2; while (map[id]) id = `${base}_${n++}`; return id; };
+  const regSet = patch => { hass = {...hass, ...patch}; setTimeout(() => onChange(hass), 80); };
+
   const callWS = async msg => {
-    if (msg.type === 'config/floor_registry/list') return Object.values(floors);
+    if (msg.type === 'config/floor_registry/list') return Object.values(hass.floors);
+    if (msg.type === 'config/entity_registry/update'){
+      const r = hass.entities[msg.entity_id];
+      if (!r) throw {code: 'not_found', message: 'Entity not found'};
+      const entry = {...r, area_id: msg.area_id ?? null};
+      regSet({entities: {...hass.entities, [msg.entity_id]: entry}});
+      console.info('[mock] Raum der Entität', msg.entity_id, '→', entry.area_id);
+      return {entity_entry: entry};
+    }
+    if (msg.type === 'config/device_registry/update'){
+      const d = hass.devices[msg.device_id];
+      if (!d) throw {code: 'not_found', message: 'Device not found'};
+      const entry = {...d, area_id: msg.area_id ?? null};
+      regSet({devices: {...hass.devices, [msg.device_id]: entry}});
+      return entry;
+    }
+    if (msg.type === 'config/area_registry/create'){
+      const area = {area_id: freeId(hass.areas, slug(msg.name)), name: msg.name, floor_id: msg.floor_id || null, icon: null, labels: [], aliases: []};
+      regSet({areas: {...hass.areas, [area.area_id]: area}});
+      console.info('[mock] Raum angelegt', area);
+      return area;
+    }
+    if (msg.type === 'config/floor_registry/create'){
+      const floor = {floor_id: freeId(hass.floors, slug(msg.name)), name: msg.name, level: msg.level ?? null, icon: null, aliases: []};
+      regSet({floors: {...hass.floors, [floor.floor_id]: floor}});
+      console.info('[mock] Etage angelegt', floor);
+      return floor;
+    }
     if (msg.type === 'config/auth/list') return USERS;
     if (msg.type === 'multisite_panel/config/get') return {config: storeGet()};
     if (msg.type === 'multisite_panel/config/save'){
